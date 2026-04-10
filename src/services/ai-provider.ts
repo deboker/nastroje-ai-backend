@@ -6,6 +6,10 @@ export type GenerateReplyInput = {
   tone: string;
   question: string;
   retrievedChunks: RetrievedChunk[];
+  conversationHistory: Array<{
+    role: 'system' | 'assistant' | 'user';
+    content: string;
+  }>;
 };
 
 export type GenerateReplyResult = {

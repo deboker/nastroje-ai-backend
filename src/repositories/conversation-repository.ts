@@ -75,6 +75,21 @@ export class ConversationRepository {
     return data ?? [];
   }
 
+  async listRecentMessages(conversationId: string, limit = 8) {
+    const { data, error } = await supabase
+      .from('messages')
+      .select('id,role,content,metadata,created_at')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      throw error;
+    }
+
+    return (data ?? []).reverse();
+  }
+
   async createMessage(conversationId: string, role: string, content: string, metadata: Record<string, unknown> = {}) {
     const { data, error } = await supabase
       .from('messages')

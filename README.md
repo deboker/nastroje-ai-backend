@@ -31,8 +31,16 @@ Express + Supabase starter backend for the WordPress plugin.
 
 1. Copy `.env.example` to `.env`.
 2. Create the Supabase project and run `backend/supabase/migrations/202604080001_init.sql`.
-3. Install dependencies with `npm install`.
-4. Start the API with `npm run dev`.
+3. Add `GROQ_API_KEY` if you want live LLM responses. Without it, the backend falls back to `MockAIProvider`.
+4. Install dependencies with `npm install`.
+5. Start the API with `npm run dev`.
+
+## LLM Provider
+
+- `GROQ_API_KEY` enables the Groq-backed provider.
+- `GROQ_MODEL` defaults to `llama-3.1-8b-instant`.
+- Chat requests are still grounded in synced site content from Supabase before the model answers.
+- The backend keeps one provider key server-side for all tenant sites. Tenant isolation still happens through `site_id` and `site_token`.
 
 ## Security Notes
 

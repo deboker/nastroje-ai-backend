@@ -41,6 +41,7 @@ export class ChatService {
       source_page_url: input.source_page_url || null,
     });
 
+    const recentMessages = await this.conversationRepository.listRecentMessages(conversation.id, 8);
     const retrievedChunks = await this.retrievalService.searchRelevantContent(siteContext.site.id, input.message, 5);
     const assistantName = input.assistant_name || siteContext.settings?.assistant_name || 'Nastroje AI Assistant';
     const language = input.language || siteContext.site.language || 'sk';
@@ -51,6 +52,10 @@ export class ChatService {
       tone,
       question: input.message,
       retrievedChunks,
+      conversationHistory: recentMessages.map((message) => ({
+        role: (message.role === 'assistant' || message.role === 'system' || message.role === 'user' ? message.role : 'user'),
+        content: message.content,
+      })),
     });
 
     await this.conversationRepository.createMessage(conversation.id, 'assistant', reply.text, {

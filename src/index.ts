@@ -13,6 +13,7 @@ import { createLeadRoutes } from './routes/leads.js';
 import { createSiteRoutes } from './routes/sites.js';
 import { createSyncRoutes } from './routes/sync.js';
 import { ChatService } from './services/chat-service.js';
+import { GroqProvider } from './services/groq-provider.js';
 import { LeadService } from './services/lead-service.js';
 import { MockAIProvider } from './services/mock-ai-provider.js';
 import { RetrievalService } from './services/retrieval-service.js';
@@ -31,11 +32,12 @@ const siteService = new SiteService(siteRepository, leadRepository);
 const syncService = new SyncService(documentRepository, opsRepository);
 const retrievalService = new RetrievalService(documentRepository);
 const leadService = new LeadService(leadRepository, conversationRepository, opsRepository);
+const aiProvider = env.GROQ_API_KEY ? new GroqProvider() : new MockAIProvider();
 const chatService = new ChatService(
   conversationRepository,
   retrievalService,
   opsRepository,
-  new MockAIProvider(),
+  aiProvider,
 );
 
 app.use(
