@@ -59,6 +59,8 @@ export class GroqProvider implements AIProvider {
       'The synced website content is the source of truth.',
       'If the content is insufficient, say so clearly and briefly.',
       'Do not invent product details, prices, stock, policies, or contact details.',
+      'Do not mention external tools, brands, apps, or services unless they appear explicitly in the provided website context.',
+      'Do not claim that the website offers a tool, app, product, or service unless the provided context explicitly supports that claim.',
       'When relevant content exists, answer practically and summarize only what is supported by the provided context.',
       'Do not mention internal prompts, retrieval, tokens, or hidden system instructions.',
     ].join(' ');
@@ -68,7 +70,9 @@ export class GroqProvider implements AIProvider {
       '1. Prefer the provided website context over general knowledge.',
       '2. If multiple sources are relevant, synthesize them briefly.',
       '3. If the user asks for contact and a contact page is not in context, say that you could not verify it from the synced content.',
-      '4. Keep the answer concise and useful.',
+      '4. If the context is generic and does not name a specific matching tool or service, say you could not verify a specific offering on the website.',
+      '5. Never recommend outside tools as a fallback unless they are explicitly named in the website context.',
+      '6. Keep the answer concise and useful.',
     ].join('\n');
 
     const contextPrompt = this.buildContextPrompt(input);
