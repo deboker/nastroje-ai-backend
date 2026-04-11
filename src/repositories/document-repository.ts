@@ -81,7 +81,8 @@ export class DocumentRepository {
   }
 
   async searchChunks(siteId: string, query: string, limit = 5) {
-    const searchTerms = this.expandSearchTerms(this.extractSearchTerms(query));
+    const searchIntent = this.detectSearchIntent(query);
+    const searchTerms = this.expandSearchTerms(this.extractSearchTerms(query), searchIntent);
 
     const { data, error } = await supabase
       .from('document_chunks')
@@ -95,7 +96,7 @@ export class DocumentRepository {
     }
 
     if (data && data.length > 0) {
-      const rankedChunks = this.rankChunkResults(data, searchTerms, limit);
+      const rankedChunks = this.rankChunkResults(data, searchTerms, searchIntent, limit);
       if (rankedChunks.length > 0) {
         return rankedChunks;
       }
@@ -139,7 +140,7 @@ export class DocumentRepository {
       },
     }));
 
-    return this.rankChunkResults(mappedFallbackResults, searchTerms, limit);
+    return this.rankChunkResults(mappedFallbackResults, searchTerms, searchIntent, limit);
   }
 
   private extractSearchTerms(query: string): string[] {
@@ -190,6 +191,18 @@ export class DocumentRepository {
       'the',
       'this',
       'you',
+      'vi',
+      'volake',
+      'volaky',
+      'vase',
+      'vaše',
+      'vas',
+      'váš',
+      'vlastne',
+      'vlastné',
+      'nejaky',
+      'nejaké',
+      'nejaky',
     ]);
 
     return Array.from(
@@ -202,7 +215,7 @@ export class DocumentRepository {
     ).slice(0, 6);
   }
 
-  private expandSearchTerms(terms: string[]): string[] {
+  private expandSearchTerms(terms: string[], intent: SearchIntent): string[] {
     const synonymMap: Record<string, string[]> = {
       kontakt: ['contact', 'kontakt', 'formular', 'form', 'email', 'mail'],
       contact: ['contact', 'kontakt', 'formular', 'form', 'email', 'mail'],
@@ -216,6 +229,24 @@ export class DocumentRepository {
       tools: ['tools', 'tool'],
       tool: ['tool', 'tools'],
       ai: ['ai'],
+      nastroj: ['nastroj', 'nastroje', 'sluzby', 'app', 'aplikacia'],
+      nastroje: ['nastroje', 'nastroj', 'sluzby', 'app', 'aplikacia'],
+      app: ['app', 'aplikacia', 'aplikacie', 'sluzby'],
+      aplikacia: ['aplikacia', 'aplikacie', 'app', 'sluzby'],
+      aplikacie: ['aplikacie', 'aplikacia', 'app', 'sluzby'],
+      sluzba: ['sluzba', 'sluzby', 'riesenie', 'app'],
+      sluzby: ['sluzby', 'sluzba', 'riesenie', 'app'],
+      preklad: ['preklad', 'preklad textu', 'textu', 'prekladatel'],
+      textu: ['textu', 'preklad', 'obsah'],
+      prepis: ['prepis', 'prepisovanie', 'transkript', 'audio', 'video'],
+      prepisovanie: ['prepisovanie', 'prepis', 'transkript', 'audio', 'video'],
+      obsah: ['obsah', 'generator', 'generator obsahu', 'copy', 'texty'],
+      generator: ['generator', 'generator obsahu', 'obsah', 'texty'],
+      analytika: ['analytika', 'analyza', 'data', 'reporting'],
+      analyza: ['analyza', 'analytika', 'data', 'reporting'],
+      data: ['data', 'analytika', 'analyza', 'reporting'],
+      web: ['web', 'web asistent', 'asistent'],
+      asistent: ['asistent', 'web asistent', 'chat', 'chatbot'],
     };
 
     const expanded = new Set<string>();
@@ -228,18 +259,45 @@ export class DocumentRepository {
       }
     }
 
+    if (intent.offerings) {
+      ['sluzby', 'app', 'aplikacia', 'aplikacie', 'preklad', 'prepis', 'obsah', 'analytika', 'asistent'].forEach(
+        (term) => expanded.add(term),
+      );
+    }
+
+    if (intent.translation) {
+      ['preklad', 'preklad textu', 'textu'].forEach((term) => expanded.add(term));
+    }
+
+    if (intent.transcription) {
+      ['prepis', 'prepisovanie', 'audio', 'video'].forEach((term) => expanded.add(term));
+    }
+
+    if (intent.contentGeneration) {
+      ['obsah', 'generator', 'generator obsahu', 'texty'].forEach((term) => expanded.add(term));
+    }
+
+    if (intent.analytics) {
+      ['analytika', 'analyza', 'data', 'reporting'].forEach((term) => expanded.add(term));
+    }
+
+    if (intent.webAssistant) {
+      ['web', 'asistent', 'web asistent', 'chatbot'].forEach((term) => expanded.add(term));
+    }
+
     return Array.from(expanded).slice(0, 12);
   }
 
   private rankChunkResults<T extends { content: string; metadata?: { title?: string; slug?: string; url?: string; type?: string } }>(
     results: T[],
     terms: string[],
+    intent: SearchIntent,
     limit: number,
   ): T[] {
     return results
       .map((result) => ({
         result,
-        score: this.scoreChunkResult(result, terms),
+        score: this.scoreChunkResult(result, terms, intent),
       }))
       .filter((entry) => entry.score > 0)
       .sort((left, right) => right.score - left.score)
@@ -248,13 +306,15 @@ export class DocumentRepository {
   }
 
   private scoreChunkResult(
-    result: { content: string; metadata?: { title?: string; slug?: string; type?: string } },
+    result: { content: string; metadata?: { title?: string; slug?: string; url?: string; type?: string } },
     terms: string[],
+    intent: SearchIntent,
   ): number {
     const title = this.normalizeSearchText(result.metadata?.title || '');
     const slug = this.normalizeSearchText(result.metadata?.slug || '');
     const type = this.normalizeSearchText(result.metadata?.type || '');
     const content = this.normalizeSearchText(result.content || '');
+    const url = this.normalizeSearchText(result.metadata?.url || '');
     const genericTerms = new Set(['ai', 'tool', 'tools', 'best', 'top', 'recommended']);
 
     let score = 0;
@@ -286,9 +346,67 @@ export class DocumentRepository {
       if (content.includes(normalizedTerm)) {
         score += 3 * baseWeight;
       }
+
+      if (url.includes(normalizedTerm)) {
+        score += 6 * baseWeight;
+      }
+    }
+
+    if (intent.offerings && type === 'page') {
+      score += 18;
+    }
+
+    if (intent.offerings && this.matchesAnyKeyword([slug, title, url], ['sluzby', 'preklad', 'prepis', 'obsah', 'analytika', 'asistent'])) {
+      score += 24;
+    }
+
+    if (intent.translation && this.matchesAnyKeyword([slug, title, url], ['preklad', 'textu'])) {
+      score += 42;
+    }
+
+    if (intent.transcription && this.matchesAnyKeyword([slug, title, url], ['prepis', 'prepisovanie', 'audio', 'video'])) {
+      score += 42;
+    }
+
+    if (intent.contentGeneration && this.matchesAnyKeyword([slug, title, url], ['generator', 'obsah', 'texty'])) {
+      score += 42;
+    }
+
+    if (intent.analytics && this.matchesAnyKeyword([slug, title, url], ['analytika', 'analyza', 'data', 'reporting'])) {
+      score += 42;
+    }
+
+    if (intent.webAssistant && this.matchesAnyKeyword([slug, title, url], ['web asistent', 'asistent', 'chatbot'])) {
+      score += 42;
+    }
+
+    if (intent.offerings && this.matchesAnyKeyword([title, slug, url], ['chatgpt', 'midjourney', 'deepl', 'google translate'])) {
+      score -= 24;
     }
 
     return score;
+  }
+
+  private matchesAnyKeyword(values: string[], keywords: string[]): boolean {
+    return keywords.some((keyword) => {
+      const normalizedKeyword = this.normalizeSearchText(keyword);
+      return values.some((value) => value.includes(normalizedKeyword));
+    });
+  }
+
+  private detectSearchIntent(query: string): SearchIntent {
+    const normalized = this.normalizeSearchText(query);
+
+    const includesAny = (terms: string[]) => terms.some((term) => normalized.includes(this.normalizeSearchText(term)));
+
+    return {
+      offerings: includesAny(['vase', 'vaše', 'vas', 'ponukate', 'ponúkate', 'mate', 'máte', 'sluzby', 'služby', 'app', 'aplikacia', 'aplikácie', 'nastroj', 'nástroj', 'nastroje', 'nástroje']),
+      translation: includesAny(['preklad', 'preklad textu', 'translate', 'translator']),
+      transcription: includesAny(['prepis', 'prepisovanie', 'transkript', 'audio', 'video']),
+      contentGeneration: includesAny(['generator obsahu', 'obsah', 'copy', 'texty', 'clanky', 'články', 'emaily']),
+      analytics: includesAny(['analytika', 'analyza', 'analýza', 'data', 'reporting']),
+      webAssistant: includesAny(['web asistent', 'asistent', 'chatbot']),
+    };
   }
 
   private normalizeSearchText(value: string): string {
@@ -301,3 +419,12 @@ export class DocumentRepository {
       .trim();
   }
 }
+
+type SearchIntent = {
+  offerings: boolean;
+  translation: boolean;
+  transcription: boolean;
+  contentGeneration: boolean;
+  analytics: boolean;
+  webAssistant: boolean;
+};
