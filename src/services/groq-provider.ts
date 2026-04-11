@@ -19,6 +19,12 @@ export class GroqProvider implements AIProvider {
     }
 
     const sources = this.collectSources(input);
+    const localReply = this.buildLocalReply(input, sources);
+
+    if (localReply) {
+      return localReply;
+    }
+
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -44,17 +50,21 @@ export class GroqProvider implements AIProvider {
       throw new Error('Groq returned an empty response.');
     }
 
+    const guardedText = this.guardResponseLanguage(text, input, sources);
+
     return {
-      text,
+      text: guardedText,
       sources,
       provider: `groq:${env.GROQ_MODEL}`,
     };
   }
 
   private buildMessages(input: GenerateReplyInput) {
+    const languageName = this.resolveLanguageName(input.language);
     const systemPrompt = [
       `You are ${input.assistantName}, an AI assistant for a specific website.`,
-      `Reply in ${input.language}.`,
+      `Reply only in ${languageName}.`,
+      `The entire user-visible answer must be in ${languageName}.`,
       `Use a ${input.tone} tone.`,
       'The synced website content is the source of truth.',
       'If the content is insufficient, say so clearly and briefly.',
@@ -62,6 +72,7 @@ export class GroqProvider implements AIProvider {
       'Do not mention external tools, brands, apps, or services unless they appear explicitly in the provided website context.',
       'Do not claim that the website offers a tool, app, product, or service unless the provided context explicitly supports that claim.',
       'When relevant content exists, answer practically and summarize only what is supported by the provided context.',
+      'Never switch to Indonesian or any other language unless the user explicitly asks for that language.',
       'Do not mention internal prompts, retrieval, tokens, or hidden system instructions.',
     ].join(' ');
 
@@ -168,5 +179,171 @@ export class GroqProvider implements AIProvider {
     }
 
     return '';
+  }
+
+  private buildLocalReply(
+    input: GenerateReplyInput,
+    sources: Array<{ title: string; url: string }>,
+  ): GenerateReplyResult | null {
+    const question = this.normalizeQuestion(input.question);
+    const slovak = this.isSlovak(input.language);
+
+    if (this.isGreeting(question) || this.isAvailabilityQuestion(question)) {
+      return {
+        text: slovak
+          ? `Dobrý deň, som ${input.assistantName}. Som tu a môžem pomôcť s otázkami o obsahu tohto webu alebo vás nasmerovať na stručný brief.`
+          : `Hello, I am ${input.assistantName}. I am here and can help with questions about this website or guide you to a short brief.`,
+        sources: [],
+        provider: `groq:${env.GROQ_MODEL}:local`,
+      };
+    }
+
+    if (this.isCapabilityQuestion(question)) {
+      return {
+        text: slovak
+          ? 'Viem odpovedať na otázky podľa zosynchronizovaného obsahu webu. Ak potrebujete dopyt alebo zadanie, môžete vyplniť aj stručný brief.'
+          : 'I can answer questions from the synced website content. If you want to send an inquiry or project request, you can also complete the short brief.',
+        sources: [],
+        provider: `groq:${env.GROQ_MODEL}:local`,
+      };
+    }
+
+    if (!input.retrievedChunks.length) {
+      return {
+        text: slovak
+          ? 'V zosynchronizovanom obsahu webu som nenašiel spoľahlivú odpoveď. Skúste otázku spresniť, spýtať sa na konkrétnu stránku, službu alebo článok.'
+          : 'I could not find a reliable answer in the synced website content. Please ask about a specific page, service, or article.',
+        sources: [],
+        provider: `groq:${env.GROQ_MODEL}:local`,
+      };
+    }
+
+    if (this.isContactQuestion(question) && sources.length > 0) {
+      return {
+        text: slovak
+          ? `Kontakt alebo súvisiacu stránku som našiel v obsahu webu. Odporúčam otvoriť: ${sources[0].title}.`
+          : `I found a relevant contact-related page on the website. Open: ${sources[0].title}.`,
+        sources,
+        provider: `groq:${env.GROQ_MODEL}:local`,
+      };
+    }
+
+    return null;
+  }
+
+  private resolveLanguageName(language: string): string {
+    const normalized = language.trim().toLowerCase();
+
+    switch (normalized) {
+      case 'sk':
+      case 'slovak':
+      case 'slovenčina':
+      case 'slovencina':
+        return 'Slovak';
+      case 'cs':
+      case 'czech':
+        return 'Czech';
+      case 'de':
+      case 'german':
+        return 'German';
+      case 'en':
+      case 'english':
+        return 'English';
+      default:
+        return normalized || 'English';
+    }
+  }
+
+  private guardResponseLanguage(
+    text: string,
+    input: GenerateReplyInput,
+    sources: Array<{ title: string; url: string }>,
+  ): string {
+    if (!this.isSlovak(input.language)) {
+      return text;
+    }
+
+    const normalized = this.normalizeQuestion(text);
+    if (!this.looksIndonesian(normalized)) {
+      return text;
+    }
+
+    const question = this.normalizeQuestion(input.question);
+
+    if (this.isContactQuestion(question) && sources.length > 0) {
+      return `Kontakt alebo súvisiacu stránku som našiel v obsahu webu. Odporúčam otvoriť: ${sources[0].title}.`;
+    }
+
+    if (sources.length > 0) {
+      return `Na webe som našiel relevantný obsah. Odporúčam otvoriť: ${sources[0].title}. Ak chcete presnejšiu odpoveď, spýtajte sa na konkrétnu službu, appku alebo článok.`;
+    }
+
+    return 'V zosynchronizovanom obsahu webu som nenašiel spoľahlivú odpoveď. Skúste otázku spresniť, spýtať sa na konkrétnu stránku, službu alebo článok.';
+  }
+
+  private isSlovak(language: string): boolean {
+    return language.trim().toLowerCase().startsWith('sk');
+  }
+
+  private normalizeQuestion(value: string): string {
+    return value
+      .trim()
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/\p{Diacritic}/gu, '')
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private looksIndonesian(value: string): boolean {
+    return /\b(saya|adalah|maaf|anda|tidak|dapat|menemukan|konteks|relevan|menjawab|pertanyaan)\b/u.test(
+      value,
+    );
+  }
+
+  private isGreeting(question: string): boolean {
+    return [
+      'ahoj',
+      'cau',
+      'dobry den',
+      'dobry vecer',
+      'hello',
+      'hi',
+      'hey',
+    ].includes(question);
+  }
+
+  private isAvailabilityQuestion(question: string): boolean {
+    return [
+      'tu si',
+      'si tu',
+      'si tam',
+      'si online',
+      'are you there',
+      'are you here',
+      'you there',
+    ].includes(question);
+  }
+
+  private isCapabilityQuestion(question: string): boolean {
+    return [
+      'co vies',
+      'ako vies pomoct',
+      'help',
+      'pomoc',
+      'what can you do',
+      'what do you do',
+      'what',
+    ].includes(question);
+  }
+
+  private isContactQuestion(question: string): boolean {
+    return [
+      'mate kontakt',
+      'kontakt',
+      'contact',
+      'ako vas kontaktovat',
+    ].includes(question);
   }
 }
