@@ -144,6 +144,7 @@ export class GroqProvider implements AIProvider {
   private collectSources(input: GenerateReplyInput): Array<{ title: string; url: string }> {
     const seen = new Set<string>();
     const sources: Array<{ title: string; url: string }> = [];
+    const deferredSources: Array<{ title: string; url: string }> = [];
 
     for (const chunk of input.retrievedChunks) {
       const url = chunk.metadata?.url?.trim();
@@ -152,14 +153,24 @@ export class GroqProvider implements AIProvider {
       }
 
       seen.add(url);
-      sources.push({
+      const nextSource = {
         title: chunk.metadata?.title?.trim() || 'Zdroj',
         url,
-      });
+      };
+
+      if (this.isLowValueSource(nextSource.title, nextSource.url)) {
+        deferredSources.push(nextSource);
+      } else {
+        sources.push(nextSource);
+      }
 
       if (sources.length >= 3) {
         break;
       }
+    }
+
+    if (!sources.length) {
+      return deferredSources.slice(0, 3);
     }
 
     return sources;
@@ -295,6 +306,13 @@ export class GroqProvider implements AIProvider {
       .replace(/[^\p{L}\p{N}\s]/gu, ' ')
       .replace(/\s+/g, ' ')
       .trim();
+  }
+
+  private isLowValueSource(title: string, url: string): boolean {
+    const normalized = this.normalizeQuestion(`${title} ${url}`);
+    return /\b(privacy|cookie|cookies|gdpr|ochrany osobnych udajov|zasady ochrany|zasady pouzivania|podmienky)\b/u.test(
+      normalized,
+    );
   }
 
   private looksIndonesian(value: string): boolean {

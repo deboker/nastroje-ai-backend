@@ -384,6 +384,10 @@ export class DocumentRepository {
       score -= 24;
     }
 
+    if (this.isLegalPage(title, slug, url) && !intent.contactLike) {
+      score -= 60;
+    }
+
     return score;
   }
 
@@ -406,7 +410,24 @@ export class DocumentRepository {
       contentGeneration: includesAny(['generator obsahu', 'obsah', 'copy', 'texty', 'clanky', 'články', 'emaily']),
       analytics: includesAny(['analytika', 'analyza', 'analýza', 'data', 'reporting']),
       webAssistant: includesAny(['web asistent', 'asistent', 'chatbot']),
+      contactLike: includesAny(['kontakt', 'contact', 'email', 'formular', 'form']),
     };
+  }
+
+  private isLegalPage(title: string, slug: string, url: string): boolean {
+    return this.matchesAnyKeyword([title, slug, url], [
+      'privacy',
+      'ochrana udajov',
+      'ochrany osobnych udajov',
+      'zasady ochrany',
+      'gdpr',
+      'cookie',
+      'cookies',
+      'suborov cookie',
+      'terms',
+      'podmienky',
+      'zasady pouzivania',
+    ]);
   }
 
   private normalizeSearchText(value: string): string {
@@ -427,4 +448,5 @@ type SearchIntent = {
   contentGeneration: boolean;
   analytics: boolean;
   webAssistant: boolean;
+  contactLike: boolean;
 };
