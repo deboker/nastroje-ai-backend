@@ -199,6 +199,7 @@ export class GroqProvider implements AIProvider {
   ): GenerateReplyResult | null {
     const question = this.normalizeQuestion(input.question);
     const slovak = this.isSlovak(input.language);
+    const servicePages = this.extractServicePages(input);
 
     if (this.isGreeting(question) || this.isAvailabilityQuestion(question)) {
       return {
@@ -216,6 +217,98 @@ export class GroqProvider implements AIProvider {
           ? 'Viem odpovedať na otázky podľa zosynchronizovaného obsahu webu. Ak potrebujete dopyt alebo zadanie, môžete vyplniť aj stručný brief.'
           : 'I can answer questions from the synced website content. If you want to send an inquiry or project request, you can also complete the short brief.',
         sources: [],
+        provider: `groq:${env.GROQ_MODEL}:local`,
+      };
+    }
+
+    if (this.isBriefQuestion(question)) {
+      return {
+        text: slovak
+          ? 'Jasné. Ak chcete zadať dopyt, otvorte kartu Stručný brief. Po kliknutí sa hneď spustia otázky.'
+          : 'Sure. If you want to send an inquiry, open the Short Brief tab. After clicking it, the questions will start immediately.',
+        sources: [
+          {
+            title: slovak ? 'Otvoriť stručný brief' : 'Open short brief',
+            url: '#brief',
+          },
+        ],
+        provider: `groq:${env.GROQ_MODEL}:local`,
+      };
+    }
+
+    if (this.isTranslationQuestion(question)) {
+      const translationPage = servicePages.find((page) => page.key === 'translation') || sources[0];
+      if (translationPage) {
+        return {
+          text: slovak
+            ? `Áno, na webe máte vlastnú službu ${translationPage.title}. Je určená na rýchly a presný preklad textu so zachovaním významu aj tónu.`
+            : `Yes, the website offers its own ${translationPage.title} service for fast and accurate text translation while preserving meaning and tone.`,
+          sources: [translationPage],
+          provider: `groq:${env.GROQ_MODEL}:local`,
+        };
+      }
+    }
+
+    if (this.isTranscriptionQuestion(question)) {
+      const transcriptionPage = servicePages.find((page) => page.key === 'transcription') || sources[0];
+      if (transcriptionPage) {
+        return {
+          text: slovak
+            ? `Áno, na webe máte vlastnú službu ${transcriptionPage.title}. Slúži na prepis audio alebo videa do textu aj so zhrnutím a ďalším spracovaním.`
+            : `Yes, the website offers its own ${transcriptionPage.title} service for converting audio or video into text with follow-up processing.`,
+          sources: [transcriptionPage],
+          provider: `groq:${env.GROQ_MODEL}:local`,
+        };
+      }
+    }
+
+    if (this.isAnalyticsQuestion(question)) {
+      const analyticsPage = servicePages.find((page) => page.key === 'analytics') || sources[0];
+      if (analyticsPage) {
+        return {
+          text: slovak
+            ? `Áno, na webe máte vlastnú službu ${analyticsPage.title}. Je zameraná na grafy, zhrnutia a odporúčania z vašich dát.`
+            : `Yes, the website offers its own ${analyticsPage.title} service focused on charts, summaries, and recommendations from your data.`,
+          sources: [analyticsPage],
+          provider: `groq:${env.GROQ_MODEL}:local`,
+        };
+      }
+    }
+
+    if (this.isContentGenerationQuestion(question)) {
+      const contentPage = servicePages.find((page) => page.key === 'content') || sources[0];
+      if (contentPage) {
+        return {
+          text: slovak
+            ? `Áno, na webe máte vlastnú službu ${contentPage.title}. Pomáha tvoriť texty v štýle značky, napríklad posty, popisy produktov, články, emaily alebo reklamy.`
+            : `Yes, the website offers its own ${contentPage.title} service for brand-aligned content such as posts, product descriptions, articles, emails, or ads.`,
+          sources: [contentPage],
+          provider: `groq:${env.GROQ_MODEL}:local`,
+        };
+      }
+    }
+
+    if (this.isWebAssistantQuestion(question)) {
+      const assistantPage = servicePages.find((page) => page.key === 'assistant') || sources[0];
+      if (assistantPage) {
+        return {
+          text: slovak
+            ? `Áno, na webe máte vlastnú službu ${assistantPage.title}. Je určená na okamžité odpovede a pomoc s navigáciou pre návštevníkov webu.`
+            : `Yes, the website offers its own ${assistantPage.title} service for instant answers and visitor guidance.`,
+          sources: [assistantPage],
+          provider: `groq:${env.GROQ_MODEL}:local`,
+        };
+      }
+    }
+
+    if (this.isOwnOfferingsQuestion(question) && servicePages.length > 0) {
+      const topPages = servicePages.slice(0, 5);
+      const serviceNames = topPages.map((page) => page.title).join(', ');
+      return {
+        text: slovak
+          ? `Áno, na webe máte vlastné riešenia a služby. Medzi hlavné patria: ${serviceNames}. Ak chcete, môžem vás nasmerovať na konkrétnu službu.`
+          : `Yes, the website offers its own services and solutions. The main ones are: ${serviceNames}. If you want, I can point you to a specific one.`,
+        sources: topPages,
         provider: `groq:${env.GROQ_MODEL}:local`,
       };
     }
@@ -349,6 +442,12 @@ export class GroqProvider implements AIProvider {
     ].includes(question);
   }
 
+  private isBriefQuestion(question: string): boolean {
+    return /\b(brief|brif|dopyt|zadanie|konzultaci|konzultaciu|konzultaciu|strucny brief|strucni brief)\b/u.test(
+      question,
+    );
+  }
+
   private isContactQuestion(question: string): boolean {
     return [
       'mate kontakt',
@@ -356,5 +455,69 @@ export class GroqProvider implements AIProvider {
       'contact',
       'ako vas kontaktovat',
     ].includes(question);
+  }
+
+  private isOwnOfferingsQuestion(question: string): boolean {
+    return /\b(vase|mate|ponukate|sluzby|nastroje|nastroj|app|aplikaci)\b/u.test(question);
+  }
+
+  private isTranslationQuestion(question: string): boolean {
+    return /\b(preklad|prelozit|preklad textu|translator)\b/u.test(question);
+  }
+
+  private isTranscriptionQuestion(question: string): boolean {
+    return /\b(prepis|prepisovanie|transkript|audio|video)\b/u.test(question);
+  }
+
+  private isContentGenerationQuestion(question: string): boolean {
+    return /\b(generator obsahu|obsah|texty|copy|emaily|reklamy)\b/u.test(question);
+  }
+
+  private isAnalyticsQuestion(question: string): boolean {
+    return /\b(analytika|analyza|data|reporting)\b/u.test(question);
+  }
+
+  private isWebAssistantQuestion(question: string): boolean {
+    return /\b(web asistent|asistent|chatbot)\b/u.test(question);
+  }
+
+  private extractServicePages(input: GenerateReplyInput): Array<{ key: string; title: string; url: string }> {
+    const seen = new Set<string>();
+    const pages: Array<{ key: string; title: string; url: string }> = [];
+
+    for (const chunk of input.retrievedChunks) {
+      const title = chunk.metadata?.title?.trim() || '';
+      const url = chunk.metadata?.url?.trim() || '';
+      const slug = this.normalizeQuestion(chunk.metadata?.slug || '');
+      const haystack = this.normalizeQuestion(`${title} ${url} ${slug}`);
+      let key = '';
+
+      if (/\bpreklad textu|preklad-textu|preklad\b/u.test(haystack)) {
+        key = 'translation';
+      } else if (/\bprepis reci|prepis-reci|prepisovanie textu|prepis\b/u.test(haystack)) {
+        key = 'transcription';
+      } else if (/\bgenerator obsahu|generator-obsahu|obsah\b/u.test(haystack)) {
+        key = 'content';
+      } else if (/\banalytika|analytika dat|analyza dat|analytika\b/u.test(haystack)) {
+        key = 'analytics';
+      } else if (/\bweb asistent|web-asistent|asistent\b/u.test(haystack)) {
+        key = 'assistant';
+      } else if (/\bsluzby\b/u.test(haystack)) {
+        key = 'services';
+      }
+
+      if (!key || !url || seen.has(url)) {
+        continue;
+      }
+
+      seen.add(url);
+      pages.push({
+        key,
+        title: title || 'Služba',
+        url,
+      });
+    }
+
+    return pages;
   }
 }

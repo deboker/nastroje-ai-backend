@@ -356,6 +356,14 @@ export class DocumentRepository {
       score += 18;
     }
 
+    if (intent.offerings && type === 'post') {
+      score -= 18;
+    }
+
+    if (this.matchesAnyKeyword([slug, title, url], ['sluzby', 'analytika', 'prepis reci', 'prepis-reci', 'generator obsahu', 'generator-obsahu', 'preklad textu', 'preklad-textu', 'web asistent', 'web-asistent'])) {
+      score += 55;
+    }
+
     if (intent.offerings && this.matchesAnyKeyword([slug, title, url], ['sluzby', 'preklad', 'prepis', 'obsah', 'analytika', 'asistent'])) {
       score += 24;
     }
