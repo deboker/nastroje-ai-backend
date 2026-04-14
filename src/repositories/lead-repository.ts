@@ -138,4 +138,20 @@ export class LeadRepository {
 
     return data;
   }
+
+  async deleteSubmission(siteId: string, submissionId: string) {
+    const { data, error } = await supabase
+      .from('lead_submissions')
+      .delete()
+      .eq('site_id', siteId)
+      .eq('id', submissionId)
+      .select('id')
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    return data;
+  }
 }

@@ -67,5 +67,20 @@ export function createLeadRoutes(leadService: LeadService) {
     }
   });
 
+  router.delete('/submissions/:submissionId', async (req: AuthedRequest, res, next) => {
+    try {
+      const siteContext = req.siteContext;
+      if (!siteContext) {
+        res.status(401).json({ error: 'Unauthorized.' });
+        return;
+      }
+
+      const result = await leadService.deleteSubmission(siteContext, String(req.params.submissionId));
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
+
   return router;
 }

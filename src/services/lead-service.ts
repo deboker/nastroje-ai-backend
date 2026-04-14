@@ -119,6 +119,22 @@ export class LeadService {
     return { submission };
   }
 
+  async deleteSubmission(siteContext: SiteContext, submissionId: string) {
+    const deleted = await this.leadRepository.deleteSubmission(siteContext.site.id, submissionId);
+    if (!deleted) {
+      throw new Error('Lead submission not found for this site.');
+    }
+
+    await this.opsRepository.logUsage(siteContext.site.id, 'lead_submission_deleted', {
+      submission_id: submissionId,
+    });
+
+    return {
+      deleted: true,
+      submission_id: submissionId,
+    };
+  }
+
   private extractAnswer(answers: LeadAnswerInput[], keys: string[]) {
     const match = answers.find((answer) => keys.includes(answer.field_id));
     return match?.value || null;
