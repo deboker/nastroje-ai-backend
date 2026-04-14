@@ -17,6 +17,29 @@ type SiteUpsertInput = {
   status?: string;
 };
 
+type RecentLeadRow = {
+  id: string;
+  contact_name?: string | null;
+  contact_email?: string | null;
+  company_name?: string | null;
+  summary?: string | null;
+  answers?: unknown;
+  status?: string | null;
+  source_page_url?: string | null;
+  created_at: string;
+};
+
+type RecentConversationRow = {
+  id: string;
+  created_at: string;
+};
+
+type RecentUserMessageRow = {
+  id: string;
+  content: string;
+  created_at: string;
+};
+
 export class SiteRepository {
   async findByTokenHash(apiKeyHash: string): Promise<SiteContext | null> {
     const { data, error } = await supabase
@@ -107,23 +130,30 @@ export class SiteRepository {
   }
 
   async getDashboardSummary(siteId: string) {
-    const [documentsCount, conversationsCount, messagesCount, leadsCount, lastSyncResult, siteResult] = await Promise.all([
-      supabase.from('documents').select('id', { count: 'exact', head: true }).eq('site_id', siteId),
-      supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('site_id', siteId),
-      supabase
-        .from('messages')
-        .select('id, conversations!inner(site_id)', { count: 'exact', head: true })
-        .eq('conversations.site_id', siteId),
-      supabase.from('lead_submissions').select('id', { count: 'exact', head: true }).eq('site_id', siteId),
-      supabase
-        .from('sync_logs')
-        .select('id,status,finished_at,items_processed')
-        .eq('site_id', siteId)
-        .order('started_at', { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      supabase.from('sites').select('id,name,domain,wp_url,language,plan,status,public_site_key').eq('id', siteId).single(),
-    ]);
+    const [documentsCount, conversationsCount, messagesCount, leadsCount, lastSyncResult, siteResult, recentLeadsResult] =
+      await Promise.all([
+        supabase.from('documents').select('id', { count: 'exact', head: true }).eq('site_id', siteId),
+        supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('site_id', siteId),
+        supabase
+          .from('messages')
+          .select('id, conversations!inner(site_id)', { count: 'exact', head: true })
+          .eq('conversations.site_id', siteId),
+        supabase.from('lead_submissions').select('id', { count: 'exact', head: true }).eq('site_id', siteId),
+        supabase
+          .from('sync_logs')
+          .select('id,status,finished_at,items_processed')
+          .eq('site_id', siteId)
+          .order('started_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabase.from('sites').select('id,name,domain,wp_url,language,plan,status,public_site_key').eq('id', siteId).single(),
+        supabase
+          .from('lead_submissions')
+          .select('id,contact_name,contact_email,company_name,status,summary,created_at')
+          .eq('site_id', siteId)
+          .order('created_at', { ascending: false })
+          .limit(5),
+      ]);
 
     if (documentsCount.error) {
       throw documentsCount.error;
@@ -143,6 +173,9 @@ export class SiteRepository {
     if (siteResult.error) {
       throw siteResult.error;
     }
+    if (recentLeadsResult.error) {
+      throw recentLeadsResult.error;
+    }
 
     return {
       site: siteResult.data as SiteRecord,
@@ -153,6 +186,85 @@ export class SiteRepository {
         totalLeads: leadsCount.count ?? 0,
       },
       lastSync: lastSyncResult.data,
+      recentLeads: recentLeadsResult.data ?? [],
+    };
+  }
+
+  async getAnalyticsSummary(siteId: string) {
+    const since = new Date();
+    since.setUTCDate(since.getUTCDate() - 29);
+    since.setUTCHours(0, 0, 0, 0);
+    const sinceIso = since.toISOString();
+
+    const [recentChatsResult, recentLeadsResult, recentUserMessagesResult, chatMessagesCountResult] = await Promise.all([
+      supabase
+        .from('conversations')
+        .select('id,created_at')
+        .eq('site_id', siteId)
+        .eq('mode', 'chat')
+        .gte('created_at', sinceIso)
+        .order('created_at', { ascending: false })
+        .limit(1000),
+      supabase
+        .from('lead_submissions')
+        .select('id,contact_name,contact_email,company_name,summary,answers,status,source_page_url,created_at')
+        .eq('site_id', siteId)
+        .gte('created_at', sinceIso)
+        .order('created_at', { ascending: false })
+        .limit(1000),
+      supabase
+        .from('messages')
+        .select('id,content,created_at,conversations!inner(site_id,mode)')
+        .eq('role', 'user')
+        .eq('conversations.site_id', siteId)
+        .eq('conversations.mode', 'chat')
+        .gte('created_at', sinceIso)
+        .order('created_at', { ascending: false })
+        .limit(1000),
+      supabase
+        .from('messages')
+        .select('id, conversations!inner(site_id,mode)', { count: 'exact', head: true })
+        .eq('conversations.site_id', siteId)
+        .eq('conversations.mode', 'chat')
+        .gte('created_at', sinceIso),
+    ]);
+
+    if (recentChatsResult.error) {
+      throw recentChatsResult.error;
+    }
+    if (recentLeadsResult.error) {
+      throw recentLeadsResult.error;
+    }
+    if (recentUserMessagesResult.error) {
+      throw recentUserMessagesResult.error;
+    }
+    if (chatMessagesCountResult.error) {
+      throw chatMessagesCountResult.error;
+    }
+
+    const recentChats = (recentChatsResult.data ?? []) as RecentConversationRow[];
+    const recentLeads = (recentLeadsResult.data ?? []) as RecentLeadRow[];
+    const recentUserMessages = (recentUserMessagesResult.data ?? []) as RecentUserMessageRow[];
+
+    return {
+      periodDays: 30,
+      totals: {
+        chats: recentChats.length,
+        leadSubmissions: recentLeads.length,
+        chatMessages: chatMessagesCountResult.count ?? 0,
+      },
+      topTopics: this.extractTopTopics(recentLeads, recentUserMessages),
+      dailyActivity: this.buildDailyActivity(since, recentChats, recentLeads),
+      recentLeadSignals: recentLeads.slice(0, 5).map((lead) => ({
+        id: lead.id,
+        contact: lead.contact_email || lead.contact_name || lead.company_name || lead.id,
+        company_name: lead.company_name || null,
+        summary: lead.summary || '',
+        answers_text: this.stringifyAnswers(lead.answers),
+        source_page_url: lead.source_page_url || null,
+        created_at: lead.created_at,
+        status: lead.status || 'new',
+      })),
     };
   }
 
@@ -171,5 +283,106 @@ export class SiteRepository {
       },
       settings,
     };
+  }
+
+  private buildDailyActivity(since: Date, chats: RecentConversationRow[], leads: RecentLeadRow[]) {
+    const chatCounts = new Map<string, number>();
+    const leadCounts = new Map<string, number>();
+
+    chats.forEach((entry) => {
+      const key = entry.created_at.slice(0, 10);
+      chatCounts.set(key, (chatCounts.get(key) ?? 0) + 1);
+    });
+
+    leads.forEach((entry) => {
+      const key = entry.created_at.slice(0, 10);
+      leadCounts.set(key, (leadCounts.get(key) ?? 0) + 1);
+    });
+
+    return Array.from({ length: 30 }, (_, index) => {
+      const date = new Date(since);
+      date.setUTCDate(since.getUTCDate() + index);
+      const isoDate = date.toISOString().slice(0, 10);
+
+      return {
+        date: isoDate,
+        label: this.formatDayMonth(isoDate),
+        chats: chatCounts.get(isoDate) ?? 0,
+        leads: leadCounts.get(isoDate) ?? 0,
+      };
+    });
+  }
+
+  private extractTopTopics(leads: RecentLeadRow[], messages: RecentUserMessageRow[]) {
+    const topicMap = new Map<string, number>();
+    const groups = [
+      { label: 'Web asistent', patterns: ['web asistent', 'chatbot', 'chat bot', 'ai chat', 'chat na web'] },
+      { label: 'Preklad textu', patterns: ['preklad', 'translation', 'translate'] },
+      { label: 'Prepis reči', patterns: ['prepis', 'transkrip', 'transcript', 'audio do textu', 'video do textu'] },
+      { label: 'Generátor obsahu', patterns: ['obsah', 'copy', 'clanok', 'článok', 'email', 'posty', 'reklamy'] },
+      { label: 'Analytika dát', patterns: ['analytika', 'data', 'dáta', 'reporting', 'grafy'] },
+      { label: 'AI na mieru', patterns: ['na mieru', 'automatiz', 'workflow', 'procesov'] },
+      { label: 'SEO', patterns: ['seo'] },
+      { label: 'Google Ads', patterns: ['google ads', 'ads'] },
+      { label: 'E-shop', patterns: ['eshop', 'e-shop', 'woo', 'woocommerce', 'shop'] },
+      { label: 'Webstránka', patterns: ['webstrank', 'web stránk', 'sajt', 'site', 'landing page'] },
+      { label: 'Podpora', patterns: ['support', 'podpora', 'helpdesk'] },
+    ];
+
+    const pushText = (value: unknown, weight = 1) => {
+      const normalized = this.normalizeText(value);
+      if (!normalized) {
+        return;
+      }
+
+      groups.forEach((group) => {
+        if (group.patterns.some((pattern) => normalized.includes(this.normalizeText(pattern)))) {
+          topicMap.set(group.label, (topicMap.get(group.label) ?? 0) + weight);
+        }
+      });
+    };
+
+    leads.forEach((lead) => {
+      pushText(lead.summary, 2);
+      pushText(lead.answers, 2);
+      pushText(lead.source_page_url, 1);
+    });
+
+    messages.forEach((message) => {
+      pushText(message.content, 1);
+    });
+
+    return Array.from(topicMap.entries())
+      .map(([label, count]) => ({ label, count }))
+      .sort((left, right) => right.count - left.count)
+      .slice(0, 5);
+  }
+
+  private stringifyAnswers(value: unknown) {
+    if (!value) {
+      return '';
+    }
+
+    if (typeof value === 'string') {
+      return value;
+    }
+
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return '';
+    }
+  }
+
+  private normalizeText(value: unknown) {
+    return this.stringifyAnswers(value)
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+  }
+
+  private formatDayMonth(isoDate: string) {
+    const [year, month, day] = isoDate.split('-');
+    return `${day}.${month}.`;
   }
 }

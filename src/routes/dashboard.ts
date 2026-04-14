@@ -20,5 +20,20 @@ export function createDashboardRoutes(siteService: SiteService) {
     }
   });
 
+  router.get('/analytics', async (req: AuthedRequest, res, next) => {
+    try {
+      const siteContext = req.siteContext;
+      if (!siteContext) {
+        res.status(401).json({ error: 'Unauthorized.' });
+        return;
+      }
+
+      const summary = await siteService.getAnalyticsSummary(siteContext.site.id);
+      res.json(summary);
+    } catch (error) {
+      next(error);
+    }
+  });
+
   return router;
 }

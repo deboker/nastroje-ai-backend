@@ -81,4 +81,8 @@ export class SiteService {
   async getDashboardSummary(siteId: string) {
     return this.siteRepository.getDashboardSummary(siteId);
   }
+
+  async getAnalyticsSummary(siteId: string) {
+    return this.siteRepository.getAnalyticsSummary(siteId);
+  }
 }
