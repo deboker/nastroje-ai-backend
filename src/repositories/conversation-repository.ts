@@ -61,6 +61,22 @@ export class ConversationRepository {
     return data ?? [];
   }
 
+  async deleteConversation(siteId: string, conversationId: string) {
+    const { data, error } = await supabase
+      .from('conversations')
+      .delete()
+      .eq('site_id', siteId)
+      .eq('id', conversationId)
+      .select('id')
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    return data;
+  }
+
   async listMessages(conversationId: string) {
     const { data, error } = await supabase
       .from('messages')

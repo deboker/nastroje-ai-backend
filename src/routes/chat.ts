@@ -52,6 +52,21 @@ export function createChatRoutes(chatService: ChatService) {
     }
   });
 
+  router.delete('/conversations/:conversationId', async (req: AuthedRequest, res, next) => {
+    try {
+      const siteContext = req.siteContext;
+      if (!siteContext) {
+        res.status(401).json({ error: 'Unauthorized.' });
+        return;
+      }
+
+      const result = await chatService.deleteConversation(siteContext, String(req.params.conversationId));
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.post('/message', async (req: AuthedRequest, res, next) => {
     try {
       const siteContext = req.siteContext;

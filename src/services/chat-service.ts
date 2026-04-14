@@ -97,6 +97,22 @@ export class ChatService {
     };
   }
 
+  async deleteConversation(siteContext: SiteContext, conversationId: string) {
+    const deleted = await this.conversationRepository.deleteConversation(siteContext.site.id, conversationId);
+    if (!deleted) {
+      throw new Error('Conversation not found for this site.');
+    }
+
+    await this.opsRepository.logUsage(siteContext.site.id, 'conversation_deleted', {
+      conversation_id: conversationId,
+    });
+
+    return {
+      deleted: true,
+      conversation_id: conversationId,
+    };
+  }
+
   private async resolveConversation(siteContext: SiteContext, input: ChatInput) {
     if (input.conversation_id) {
       const existing = await this.conversationRepository.findConversation(siteContext.site.id, input.conversation_id);
