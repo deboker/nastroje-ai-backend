@@ -353,19 +353,36 @@ export class DocumentRepository {
     }
 
     if (intent.offerings && type === 'page') {
-      score += 18;
+      score += 24;
     }
 
     if (intent.offerings && type === 'post') {
-      score -= 18;
+      score -= 26;
     }
 
     if (this.matchesAnyKeyword([slug, title, url], ['sluzby', 'analytika', 'prepis reci', 'prepis-reci', 'generator obsahu', 'generator-obsahu', 'preklad textu', 'preklad-textu', 'web asistent', 'web-asistent'])) {
-      score += 55;
+      score += 70;
     }
 
     if (intent.offerings && this.matchesAnyKeyword([slug, title, url], ['sluzby', 'preklad', 'prepis', 'obsah', 'analytika', 'asistent'])) {
-      score += 24;
+      score += 38;
+    }
+
+    if (
+      intent.offerings &&
+      this.matchesAnyKeyword([content], [
+        'preklad textu',
+        'prepis audio',
+        'prepis video',
+        'generator obsahu',
+        'analyza dat',
+        'analytika dat',
+        'web asistent',
+        'ai na mieru',
+        'odporucanie + nastavenie',
+      ])
+    ) {
+      score += 30;
     }
 
     if (intent.translation && this.matchesAnyKeyword([slug, title, url], ['preklad', 'textu'])) {
@@ -389,6 +406,10 @@ export class DocumentRepository {
     }
 
     if (intent.offerings && this.matchesAnyKeyword([title, slug, url], ['chatgpt', 'midjourney', 'deepl', 'google translate'])) {
+      score -= 36;
+    }
+
+    if (intent.offerings && this.matchesAnyKeyword([title, slug, url], ['top', 'najnovsie', 'najnovsi', 'blog', 'navody', 'sprievodca', 'review'])) {
       score -= 24;
     }
 
