@@ -42,56 +42,56 @@ const OFFERING_CATALOG: Array<{
   descriptionEn: string;
   patterns: string[];
 }> = [
-  {
-    key: 'translation',
-    title: 'Preklad textu',
-    descriptionSk: 'rýchly a presný preklad so zachovaním významu aj tónu',
-    descriptionEn: 'fast and accurate text translation while preserving meaning and tone',
-    patterns: ['preklad textu', 'preklad-textu', 'preklad', 'translate', 'translator'],
-  },
-  {
-    key: 'transcription',
-    title: 'Automatické prepisovanie textu',
-    descriptionSk: 'prepis audio alebo videa do textu vrátane zhrnutia a ďalšieho spracovania',
-    descriptionEn: 'audio and video transcription into text including summary and follow-up processing',
-    patterns: ['prepis reci', 'prepis-reci', 'prepisovanie textu', 'prepis', 'transkript', 'audio', 'video'],
-  },
-  {
-    key: 'content',
-    title: 'Generátor obsahu',
-    descriptionSk: 'tvorba textov v štýle značky pre posty, články, emaily, reklamy a popisy produktov',
-    descriptionEn: 'brand-aligned content creation for posts, articles, emails, ads, and product copy',
-    patterns: ['generator obsahu', 'generator-obsahu', 'obsah', 'copy', 'texty', 'emaily', 'reklamy'],
-  },
-  {
-    key: 'analytics',
-    title: 'Pokročilá analýza dát',
-    descriptionSk: 'grafy, zhrnutia a odporúčania z dát pre reporting a rýchle rozhodovanie',
-    descriptionEn: 'charts, summaries, and recommendations from data for reporting and faster decisions',
-    patterns: ['analyza dat', 'analytika dat', 'analytika', 'analyza', 'data', 'reporting'],
-  },
-  {
-    key: 'assistant',
-    title: 'Web asistent',
-    descriptionSk: 'okamžité odpovede a pomoc s navigáciou pre návštevníkov webu, služieb aj produktov',
-    descriptionEn: 'instant answers and navigation help for visitors across the website, services, and products',
-    patterns: ['web asistent', 'web-asistent', 'asistent', 'chatbot'],
-  },
-  {
-    key: 'custom-ai',
-    title: 'AI na mieru',
-    descriptionSk: 'prispôsobenie AI nástrojov podľa procesov, tónu komunikácie a šablón značky',
-    descriptionEn: 'tailored AI setup based on business processes, tone of voice, and brand templates',
-    patterns: ['ai na mieru', 'podla vasich procesov', 'podľa vašich procesov'],
-  },
-  {
-    key: 'setup',
-    title: 'Odporúčanie + nastavenie',
-    descriptionSk: 'výber vhodného riešenia a nastavenie workflow, promptov a pravidiel kvality',
-    descriptionEn: 'choosing the right solution and setting up workflows, prompts, and quality rules',
-    patterns: ['odporucanie + nastavenie', 'odporúčanie + nastavenie', 'workflow', 'prompty', 'sablony', 'šablóny'],
-  },
-];
+    {
+      key: 'translation',
+      title: 'Preklad textu',
+      descriptionSk: 'rýchly a presný preklad so zachovaním významu aj tónu',
+      descriptionEn: 'fast and accurate text translation while preserving meaning and tone',
+      patterns: ['preklad textu', 'preklad-textu', 'preklad', 'translate', 'translator'],
+    },
+    {
+      key: 'transcription',
+      title: 'Automatické prepisovanie textu',
+      descriptionSk: 'prepis audio alebo videa do textu vrátane zhrnutia a ďalšieho spracovania',
+      descriptionEn: 'audio and video transcription into text including summary and follow-up processing',
+      patterns: ['prepis reci', 'prepis-reci', 'prepisovanie textu', 'prepis', 'transkript', 'audio', 'video'],
+    },
+    {
+      key: 'content',
+      title: 'Generátor obsahu',
+      descriptionSk: 'tvorba textov v štýle značky pre posty, články, emaily, reklamy a popisy produktov',
+      descriptionEn: 'brand-aligned content creation for posts, articles, emails, ads, and product copy',
+      patterns: ['generator obsahu', 'generator-obsahu', 'obsah', 'copy', 'texty', 'emaily', 'reklamy'],
+    },
+    {
+      key: 'analytics',
+      title: 'Pokročilá analýza dát',
+      descriptionSk: 'grafy, zhrnutia a odporúčania z dát pre reporting a rýchle rozhodovanie',
+      descriptionEn: 'charts, summaries, and recommendations from data for reporting and faster decisions',
+      patterns: ['analyza dat', 'analytika dat', 'analytika', 'analyza', 'data', 'reporting'],
+    },
+    {
+      key: 'assistant',
+      title: 'Web asistent',
+      descriptionSk: 'okamžité odpovede a pomoc s navigáciou pre návštevníkov webu, služieb aj produktov',
+      descriptionEn: 'instant answers and navigation help for visitors across the website, services, and products',
+      patterns: ['web asistent', 'web-asistent', 'asistent', 'chatbot'],
+    },
+    {
+      key: 'custom-ai',
+      title: 'AI na mieru',
+      descriptionSk: 'prispôsobenie AI nástrojov podľa procesov, tónu komunikácie a šablón značky',
+      descriptionEn: 'tailored AI setup based on business processes, tone of voice, and brand templates',
+      patterns: ['ai na mieru', 'podla vasich procesov', 'podľa vašich procesov'],
+    },
+    {
+      key: 'setup',
+      title: 'Odporúčanie + nastavenie',
+      descriptionSk: 'výber vhodného riešenia a nastavenie workflow, promptov a pravidiel kvality',
+      descriptionEn: 'choosing the right solution and setting up workflows, prompts, and quality rules',
+      patterns: ['odporucanie + nastavenie', 'odporúčanie + nastavenie', 'workflow', 'prompty', 'sablony', 'šablóny'],
+    },
+  ];
 
 export class GroqProvider implements AIProvider {
   async generateReply(input: GenerateReplyInput): Promise<GenerateReplyResult> {
@@ -114,7 +114,7 @@ export class GroqProvider implements AIProvider {
       },
       body: JSON.stringify({
         model: env.GROQ_MODEL,
-        temperature: 0.2,
+        temperature: 0.8,
         messages: this.buildMessages(input),
       }),
     });
@@ -206,11 +206,11 @@ export class GroqProvider implements AIProvider {
       ...(historyAlreadyEndsWithQuestion
         ? []
         : [
-            {
-              role: 'user' as const,
-              content: input.question,
-            },
-          ]),
+          {
+            role: 'user' as const,
+            content: input.question,
+          },
+        ]),
     ];
   }
 
