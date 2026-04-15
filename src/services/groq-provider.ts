@@ -507,8 +507,10 @@ export class GroqProvider implements AIProvider {
 
       const title = chunk.metadata?.title?.trim() || 'Článok';
 
-      const dateMs = this.parseDateMaybe(chunk.metadata?.date || chunk.metadata?.publishedAt || chunk.metadata?.modifiedAt);
-      const score = typeof chunk.metadata?.score === 'number' ? chunk.metadata.score : 0;
+      const meta = (chunk.metadata ?? {}) as Record<string, unknown>;
+
+      const dateMs = this.parseDateMaybe(meta.date ?? meta.publishedAt ?? meta.modifiedAt);
+      const score = typeof meta.score === 'number' ? (meta.score as number) : 0;
 
       candidates.push({ title, url, dateMs, score });
     }
