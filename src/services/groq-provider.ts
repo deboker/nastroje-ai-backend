@@ -330,15 +330,26 @@ export class GroqProvider implements AIProvider {
       const picked = this.pickBlogSource(input, intent.latestBlog ? 'latest' : 'relevant');
 
       if (picked) {
+        if (intent.latestBlog && !picked.isCertainLatest) {
+          return {
+            text: slovak
+              ? `Nevidím spoľahlivo dátumy publikovania v zosynchronizovanom obsahu, takže neviem na 100% určiť *posledný pridaný* článok. Ako dobrý tip z dostupných zdrojov: ${picked.title}. Chcete odkaz?`
+              : `I can't reliably see publish dates in the synced content, so I can’t be 100% sure about the latest article. A good pick from available sources: ${picked.title}. Want the link?`,
+            sources: [{ title: picked.title, url: picked.url }],
+            provider: `groq:${env.GROQ_MODEL}:local`,
+          };
+        }
+
         return {
           text: slovak
-            ? `${intent.latestBlog ? 'Najnovší článok, ktorý viem z dostupných zdrojov vybrať, je' : 'Najrelevantnejší článok k tomu je'}: ${picked.title}. Chcete krátke zhrnutie, alebo rovno odkaz?`
-            : `${intent.latestBlog ? 'The latest article I can pick from available sources is' : 'The most relevant article is'}: ${picked.title}. Want a short summary or the link?`,
-          sources: [picked],
+            ? `${intent.latestBlog ? 'Najnovší článok je' : 'Najrelevantnejší článok je'}: ${picked.title}. Chcete krátke zhrnutie alebo odkaz?`
+            : `${intent.latestBlog ? 'The latest article is' : 'The most relevant article is'}: ${picked.title}. Want a short summary or the link?`,
+          sources: [{ title: picked.title, url: picked.url }],
           provider: `groq:${env.GROQ_MODEL}:local`,
         };
       }
 
+      // keď blog intent je true, ale nič sme nevybrali, vráť rozumný fallback
       return {
         text: slovak
           ? 'Článok k tomu v zosynchronizovanom obsahu neviem teraz spoľahlivo vybrať. Skúste prosím názov témy/článku (alebo slovo z nadpisu).'
@@ -350,11 +361,11 @@ export class GroqProvider implements AIProvider {
 
     // 8) Kontakt: ak máme aspoň 1 zdroj a intent je contact, nasmeruj.
     if (intent.contact && input.retrievedChunks.length && sources.length > 0) {
+      const best = this.pickBestContactSource(sources) || sources[0];
+
       return {
-        text: slovak
-          ? `Našiel som relevantnú stránku ku kontaktu. Najrýchlejšie bude otvoriť: ${sources[0].title}.`
-          : `I found a relevant contact page. The fastest next step is to open: ${sources[0].title}.`,
-        sources,
+        text: slovak ? `Kontakt nájdete tu: ${best.title}.` : `You can find contact details here: ${best.title}.`,
+        sources: [best],
         provider: `groq:${env.GROQ_MODEL}:local`,
       };
     }
@@ -489,13 +500,8 @@ export class GroqProvider implements AIProvider {
   private pickBlogSource(
     input: GenerateReplyInput,
     mode: 'latest' | 'relevant',
-  ): { title: string; url: string } | null {
-    const candidates: Array<{
-      title: string;
-      url: string;
-      dateMs: number | null;
-      score: number;
-    }> = [];
+  ): { title: string; url: string; isCertainLatest: boolean } | null {
+    const candidates: Array<{ title: string; url: string; dateMs: number | null; score: number }> = [];
 
     for (const chunk of input.retrievedChunks) {
       const type = this.normalizeQuestion(chunk.metadata?.type || '');
@@ -509,8 +515,11 @@ export class GroqProvider implements AIProvider {
 
       const meta = (chunk.metadata ?? {}) as Record<string, unknown>;
 
-      const dateMs = this.parseDateMaybe(meta.date ?? meta.publishedAt ?? meta.modifiedAt);
-      const score = typeof meta.score === 'number' ? (meta.score as number) : 0;
+      const dateMs = this.parseDateMaybe(
+        meta['date'] ?? meta['publishedAt'] ?? meta['modifiedAt']
+      );
+
+      const score = typeof meta['score'] === 'number' ? (meta['score'] as number) : 0;
 
       candidates.push({ title, url, dateMs, score });
     }
@@ -518,18 +527,23 @@ export class GroqProvider implements AIProvider {
     if (!candidates.length) return null;
 
     if (mode === 'latest') {
-      // ak máme dátumy, vyber najnovší; inak fallback na prvý kandidát (aspoň niečo) – ale text bude opatrný (riešime v local reply)
-      const withDates = candidates.filter((c) => c.dateMs !== null) as Array<{ title: string; url: string; dateMs: number; score: number }>;
+      const withDates = candidates.filter((c) => c.dateMs !== null) as Array<{
+        title: string; url: string; dateMs: number; score: number;
+      }>;
+
       if (withDates.length) {
         withDates.sort((a, b) => b.dateMs - a.dateMs);
-        return { title: withDates[0].title, url: withDates[0].url };
+        return { title: withDates[0].title, url: withDates[0].url, isCertainLatest: true };
       }
-      return { title: candidates[0].title, url: candidates[0].url };
+
+      // nemáme dátumy -> vieme len tipnúť „jeden z posledných“, nie tvrdiť najnovší
+      // vyber “najrelevantnejší” ako kandidát
+      candidates.sort((a, b) => (b.score || 0) - (a.score || 0));
+      return { title: candidates[0].title, url: candidates[0].url, isCertainLatest: false };
     }
 
-    // relevant: použijeme score ak existuje, inak prvý
     candidates.sort((a, b) => (b.score || 0) - (a.score || 0));
-    return { title: candidates[0].title, url: candidates[0].url };
+    return { title: candidates[0].title, url: candidates[0].url, isCertainLatest: false };
   }
 
   // ---------------------------
@@ -549,7 +563,8 @@ export class GroqProvider implements AIProvider {
     const question = this.normalizeQuestion(input.question);
 
     if (this.isContactQuestion(question) && sources.length > 0) {
-      return `Našiel som relevantnú stránku ku kontaktu. Odporúčam otvoriť: ${sources[0].title}.`;
+      const best = this.pickBestContactSource(sources) || sources[0];
+      return `Kontakt nájdete tu: ${best.title}.`;
     }
 
     if (sources.length > 0) {
@@ -725,6 +740,24 @@ export class GroqProvider implements AIProvider {
     return /\b(privacy|cookie|cookies|gdpr|ochrany osobnych udajov|zasady ochrany|zasady pouzivania|podmienky)\b/u.test(
       normalized,
     );
+  }
+
+  private pickBestContactSource(sources: Array<{ title: string; url: string }>) {
+    if (!sources.length) return null;
+
+    const scored = sources.map((s) => {
+      const hay = this.normalizeQuestion(`${s.title} ${s.url}`);
+
+      const score =
+        (/\b(kontakt|contact)\b/u.test(hay) ? 10 : 0) +
+        (/\b(kontakt|contact)\b/u.test(this.normalizeQuestion(s.title)) ? 5 : 0) +
+        (/\b(kontakt|contact)\b/u.test(this.normalizeQuestion(s.url)) ? 3 : 0);
+
+      return { s, score };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+    return scored[0]?.s || null;
   }
 
   private looksIndonesian(value: string): boolean {
