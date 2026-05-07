@@ -44,6 +44,24 @@ export class ConversationRepository {
     return data;
   }
 
+  async findLatestConversationBySession(siteId: string, sessionId: string, mode = 'chat') {
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('*')
+      .eq('site_id', siteId)
+      .eq('session_id', sessionId)
+      .eq('mode', mode)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    return data;
+  }
+
   async listConversations(siteId: string, page: number, perPage: number) {
     const from = (page - 1) * perPage;
     const to = from + perPage - 1;
@@ -104,6 +122,19 @@ export class ConversationRepository {
     }
 
     return (data ?? []).reverse();
+  }
+
+  async countMessages(conversationId: string) {
+    const { count, error } = await supabase
+      .from('messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('conversation_id', conversationId);
+
+    if (error) {
+      throw error;
+    }
+
+    return count ?? 0;
   }
 
   async createMessage(conversationId: string, role: string, content: string, metadata: Record<string, unknown> = {}) {

@@ -21,6 +21,8 @@ import { SiteService } from './services/site-service.js';
 import { SyncService } from './services/sync-service.js';
 
 const app = express();
+app.set('trust proxy', 1);
+
 const siteRepository = new SiteRepository();
 const documentRepository = new DocumentRepository();
 const conversationRepository = new ConversationRepository();
@@ -58,6 +60,11 @@ app.use('/api/leads', authenticateSite, createLeadRoutes(leadService));
 app.use('/api/dashboard', authenticateSite, createDashboardRoutes(siteService));
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if (error && typeof error === 'object' && 'statusCode' in error && typeof error.statusCode === 'number') {
+    res.status(error.statusCode).json({ error: error instanceof Error ? error.message : 'Request failed' });
+    return;
+  }
+
   const message = error instanceof Error ? error.message : 'Unexpected server error';
   res.status(500).json({ error: message });
 });

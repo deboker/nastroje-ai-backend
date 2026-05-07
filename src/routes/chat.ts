@@ -1,10 +1,19 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { InMemoryRateLimiter } from '../lib/rate-limit.js';
 import type { AuthedRequest } from '../types/site-context.js';
 import { ChatService } from '../services/chat-service.js';
 
 const MAX_CHAT_MESSAGE_LENGTH = 2000;
 const MAX_OPTIONAL_FIELD_LENGTH = 500;
+const chatMessageLimiter = new InMemoryRateLimiter([
+  { windowMs: 60_000, max: 10 },
+  { windowMs: 60 * 60_000, max: 100 },
+]);
+const failedChatLimiter = new InMemoryRateLimiter([
+  { windowMs: 60_000, max: 5 },
+  { windowMs: 60 * 60_000, max: 20 },
+]);
 
 const chatMessageSchema = z.object({
   conversation_id: z.string().trim().max(80).optional().or(z.literal('')),
@@ -92,6 +101,13 @@ export function createChatRoutes(chatService: ChatService) {
 
       const parsed = chatMessageSchema.safeParse(req.body);
       if (!parsed.success) {
+        const failedDecision = failedChatLimiter.consume(buildFailedRateLimitKey(req, siteContext.site.id));
+        if (!failedDecision.allowed) {
+          res.setHeader('Retry-After', String(failedDecision.retryAfterSeconds ?? 60));
+          res.status(429).json({ error: 'Too many failed chat requests. Please try again later.' });
+          return;
+        }
+
         res.status(400).json({
           error: `Message must be 1-${MAX_CHAT_MESSAGE_LENGTH} characters.`,
           details: parsed.error.flatten().fieldErrors,
@@ -99,7 +115,23 @@ export function createChatRoutes(chatService: ChatService) {
         return;
       }
 
-      const result = await chatService.sendMessage(siteContext, parsed.data);
+      const decision = chatMessageLimiter.consume(
+        buildChatRateLimitKey(req, siteContext.site.id, parsed.data.session_id || parsed.data.conversation_id || 'no-session'),
+      );
+      if (!decision.allowed) {
+        res.setHeader('Retry-After', String(decision.retryAfterSeconds ?? 60));
+        res.status(429).json({ error: 'Too many chat messages. Please wait a moment and try again.' });
+        return;
+      }
+
+      let result;
+      try {
+        result = await chatService.sendMessage(siteContext, parsed.data);
+      } catch (error) {
+        failedChatLimiter.consume(buildFailedRateLimitKey(req, siteContext.site.id));
+        throw error;
+      }
+
       res.json(result);
     } catch (error) {
       next(error);
@@ -107,4 +139,16 @@ export function createChatRoutes(chatService: ChatService) {
   });
 
   return router;
+}
+
+function buildChatRateLimitKey(req: AuthedRequest, siteId: string, sessionId: string) {
+  return `chat:${clientIp(req)}:${siteId}:${sessionId}`;
+}
+
+function buildFailedRateLimitKey(req: AuthedRequest, siteId: string) {
+  return `chat-failed:${clientIp(req)}:${siteId}`;
+}
+
+function clientIp(req: AuthedRequest) {
+  return req.ip || req.socket.remoteAddress || 'unknown';
 }

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { HttpError } from '../lib/http-error.js';
 import { ConversationRepository } from '../repositories/conversation-repository.js';
 import { OpsRepository } from '../repositories/ops-repository.js';
 import type { SiteContext } from '../types/site-context.js';
@@ -15,6 +16,8 @@ type ChatInput = {
   source_page_url?: string;
   user_identifier?: string;
 };
+
+const MAX_CONVERSATION_MESSAGES = 60;
 
 export class ChatService {
   constructor(
@@ -36,6 +39,14 @@ export class ChatService {
 
   async sendMessage(siteContext: SiteContext, input: ChatInput) {
     const conversation = await this.resolveConversation(siteContext, input);
+    const messageCount = await this.conversationRepository.countMessages(conversation.id);
+
+    if (messageCount >= MAX_CONVERSATION_MESSAGES - 1) {
+      throw new HttpError(
+        409,
+        'Conversation limit reached. Please start a new conversation to continue.',
+      );
+    }
 
     await this.conversationRepository.createMessage(conversation.id, 'user', input.message, {
       source_page_url: input.source_page_url || null,
@@ -118,6 +129,17 @@ export class ChatService {
       const existing = await this.conversationRepository.findConversation(siteContext.site.id, input.conversation_id);
       if (existing) {
         return existing;
+      }
+    }
+
+    if (input.session_id) {
+      const existingSessionConversation = await this.conversationRepository.findLatestConversationBySession(
+        siteContext.site.id,
+        input.session_id,
+        'chat',
+      );
+      if (existingSessionConversation) {
+        return existingSessionConversation;
       }
     }
 
