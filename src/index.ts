@@ -60,12 +60,25 @@ app.use('/api/leads', authenticateSite, createLeadRoutes(leadService));
 app.use('/api/dashboard', authenticateSite, createDashboardRoutes(siteService));
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error(error);
+
   if (error && typeof error === 'object' && 'statusCode' in error && typeof error.statusCode === 'number') {
-    res.status(error.statusCode).json({ error: error instanceof Error ? error.message : 'Request failed' });
+    const message =
+      process.env.NODE_ENV === 'production' && error.statusCode >= 500
+        ? 'Internal server error'
+        : error instanceof Error
+          ? error.message
+          : 'Request failed';
+    res.status(error.statusCode).json({ error: message });
     return;
   }
 
-  const message = error instanceof Error ? error.message : 'Unexpected server error';
+  const message =
+    process.env.NODE_ENV === 'production'
+      ? 'Internal server error'
+      : error instanceof Error
+        ? error.message
+        : 'Unexpected server error';
   res.status(500).json({ error: message });
 });
 

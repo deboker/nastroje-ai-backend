@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { InMemoryRateLimiter } from '../lib/rate-limit.js';
+import { BLOCKED_CHAT_REPLY, checkMessageSecurity, createSafeMessagePreview } from '../lib/security-filter.js';
 import type { AuthedRequest } from '../types/site-context.js';
 import { ChatService } from '../services/chat-service.js';
 
@@ -124,6 +125,24 @@ export function createChatRoutes(chatService: ChatService) {
         return;
       }
 
+      const securityDecision = checkMessageSecurity(parsed.data.message);
+      if (!securityDecision.allowed) {
+        logSecurityEvent({
+          category: securityDecision.category ?? 'unknown',
+          risk: securityDecision.risk,
+          siteId: siteContext.site.id,
+          sessionId: parsed.data.session_id || parsed.data.conversation_id || 'no-session',
+          ip: clientIp(req),
+          message: parsed.data.message,
+        });
+
+        res.json({
+          reply: BLOCKED_CHAT_REPLY,
+          blocked: true,
+        });
+        return;
+      }
+
       let result;
       try {
         result = await chatService.sendMessage(siteContext, parsed.data);
@@ -151,4 +170,24 @@ function buildFailedRateLimitKey(req: AuthedRequest, siteId: string) {
 
 function clientIp(req: AuthedRequest) {
   return req.ip || req.socket.remoteAddress || 'unknown';
+}
+
+function logSecurityEvent(input: {
+  category: string;
+  risk: string;
+  siteId: string;
+  sessionId: string;
+  ip: string;
+  message: string;
+}) {
+  console.warn({
+    type: 'security_event',
+    category: input.category,
+    risk: input.risk,
+    siteId: input.siteId,
+    sessionId: input.sessionId,
+    ip: input.ip,
+    messagePreview: createSafeMessagePreview(input.message),
+    createdAt: new Date().toISOString(),
+  });
 }
