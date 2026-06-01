@@ -44,7 +44,12 @@ const chatService = new ChatService(
 
 app.use(
   cors({
-    origin: env.CORS_ORIGIN === '*' ? true : env.CORS_ORIGIN.split(','),
+    origin:
+      env.CORS_ORIGIN.trim() === '*'
+        ? true
+        : env.CORS_ORIGIN.split(',')
+            .map((origin) => origin.trim())
+            .filter(Boolean),
   }),
 );
 app.use(express.json({ limit: '2mb' }));
