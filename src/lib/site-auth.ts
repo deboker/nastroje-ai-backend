@@ -20,6 +20,11 @@ export function siteAuth(siteRepository: SiteRepository) {
         return;
       }
 
+      if (siteContext.site.status !== 'active') {
+        res.status(403).json({ error: 'Site is inactive.' });
+        return;
+      }
+
       req.siteContext = siteContext;
       next();
     } catch (error) {

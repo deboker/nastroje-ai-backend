@@ -6,7 +6,7 @@ type SiteRow = SiteRecord & {
   site_settings?: SiteSettingsRecord | SiteSettingsRecord[] | null;
 };
 
-type SiteUpsertInput = {
+type SiteCreateInput = {
   name: string;
   domain: string;
   wp_url: string;
@@ -69,24 +69,19 @@ export class SiteRepository {
     return data ? this.mapSiteContext(data as SiteRow) : null;
   }
 
-  async upsertSite(input: SiteUpsertInput): Promise<SiteRecord> {
+  async createSite(input: SiteCreateInput): Promise<SiteRecord> {
     const { data, error } = await supabase
       .from('sites')
-      .upsert(
-        {
-          name: input.name,
-          domain: input.domain,
-          wp_url: input.wp_url,
-          language: input.language,
-          api_key_hash: input.api_key_hash,
-          public_site_key: input.public_site_key,
-          plan: input.plan ?? 'mvp',
-          status: input.status ?? 'active',
-        },
-        {
-          onConflict: 'domain',
-        },
-      )
+      .insert({
+        name: input.name,
+        domain: input.domain,
+        wp_url: input.wp_url,
+        language: input.language,
+        api_key_hash: input.api_key_hash,
+        public_site_key: input.public_site_key,
+        plan: input.plan ?? 'mvp',
+        status: input.status ?? 'active',
+      })
       .select('id,name,domain,wp_url,language,plan,status,public_site_key')
       .single();
 

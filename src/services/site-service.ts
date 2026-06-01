@@ -1,4 +1,5 @@
 import { env } from '../lib/env.js';
+import { HttpError } from '../lib/http-error.js';
 import { LeadRepository } from '../repositories/lead-repository.js';
 import { SiteRepository } from '../repositories/site-repository.js';
 import { TokenService } from './token-service.js';
@@ -20,19 +21,33 @@ export class SiteService {
 
   async registerSite(input: RegisterSiteInput) {
     if (env.OPEN_SITE_REGISTRATION !== 'true') {
-      throw new Error('Open site registration is disabled. Issue the site token from your backend admin flow.');
+      throw new HttpError(403, 'Site registration is disabled.');
+    }
+
+    const existingSite = await this.siteRepository.findByDomain(input.domain);
+    if (existingSite) {
+      throw new HttpError(409, 'Site is already registered.');
     }
 
     const siteToken = TokenService.generateSiteToken();
     const publicSiteKey = TokenService.generatePublicSiteKey();
-    const site = await this.siteRepository.upsertSite({
-      name: input.name,
-      domain: input.domain,
-      wp_url: input.wp_url,
-      language: input.language || env.DEFAULT_LANGUAGE,
-      api_key_hash: TokenService.hashToken(siteToken),
-      public_site_key: publicSiteKey,
-    });
+    let site;
+    try {
+      site = await this.siteRepository.createSite({
+        name: input.name,
+        domain: input.domain,
+        wp_url: input.wp_url,
+        language: input.language || env.DEFAULT_LANGUAGE,
+        api_key_hash: TokenService.hashToken(siteToken),
+        public_site_key: publicSiteKey,
+      });
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new HttpError(409, 'Site is already registered.');
+      }
+
+      throw error;
+    }
 
     const settings = await this.siteRepository.upsertSiteSettings(site.id, {
       assistant_name: input.site_settings?.assistant_name ?? 'Nastroje AI Assistant',
@@ -85,4 +100,8 @@ export class SiteService {
   async getAnalyticsSummary(siteId: string) {
     return this.siteRepository.getAnalyticsSummary(siteId);
   }
+}
+
+function isUniqueViolation(error: unknown): error is { code: string } {
+  return Boolean(error && typeof error === 'object' && 'code' in error && error.code === '23505');
 }
