@@ -133,7 +133,7 @@ export class GroqProvider implements AIProvider {
   private buildMessages(input: GenerateReplyInput) {
     const languageName = this.resolveLanguageName(input.language);
     const intent = this.detectIntent(input.question);
-    const offers = this.extractOffers(input);
+    const offers = intent.blog ? [] : this.extractOffers(input);
 
     // Kratší, jasnejší systém prompt = rýchlejšie + menej „robot“
     const systemPrompt = [
@@ -224,7 +224,7 @@ export class GroqProvider implements AIProvider {
   ): GenerateReplyResult | null {
     const slovak = this.isSlovak(input.language);
     const intent = this.detectIntent(input.question);
-    const offers = this.extractOffers(input);
+    const offers = intent.blog ? [] : this.extractOffers(input);
 
     const offerSources = offers
       .map((o) => ({ title: o.title, url: o.url }))
@@ -262,7 +262,40 @@ export class GroqProvider implements AIProvider {
       };
     }
 
-    // 4) Ak je to webová otázka, ale nemáš žiadny kontext → férové priznanie.
+    // 4) Blog/article topic wins over service/offering routing.
+    if (intent.latestBlog || intent.blog) {
+      const picked = this.pickBlogSource(input, intent.latestBlog ? 'latest' : 'relevant');
+
+      if (picked) {
+        if (intent.latestBlog && !picked.isCertainLatest) {
+          return {
+            text: slovak
+              ? `Nevidím spoľahlivo dátumy publikovania v zosynchronizovanom obsahu, takže neviem na 100% určiť *posledný pridaný* článok. Ako dobrý tip z dostupných zdrojov: ${picked.title}. Chcete odkaz?`
+              : `I can't reliably see publish dates in the synced content, so I can’t be 100% sure about the latest article. A good pick from available sources: ${picked.title}. Want the link?`,
+            sources: [{ title: picked.title, url: picked.url }],
+            provider: `groq:${env.GROQ_MODEL}:local`,
+          };
+        }
+
+        return {
+          text: slovak
+            ? `${intent.latestBlog ? 'Najnovší článok je' : 'Najrelevantnejší článok je'}: ${picked.title}. Chcete krátke zhrnutie alebo odkaz?`
+            : `${intent.latestBlog ? 'The latest article is' : 'The most relevant article is'}: ${picked.title}. Want a short summary or the link?`,
+          sources: [{ title: picked.title, url: picked.url }],
+          provider: `groq:${env.GROQ_MODEL}:local`,
+        };
+      }
+
+      return {
+        text: slovak
+          ? 'Článok k tomu v zosynchronizovanom obsahu neviem teraz spoľahlivo vybrať. Skúste prosím názov témy/článku (alebo slovo z nadpisu).'
+          : 'I can’t reliably pick an article from the synced content right now. Please share the topic or a keyword from the title.',
+        sources: [],
+        provider: `groq:${env.GROQ_MODEL}:local`,
+      };
+    }
+
+    // 5) Ak je to webová otázka, ale nemáš žiadny kontext → férové priznanie.
     //    DÔLEŽITÉ: toto už neblokuje bežné všeobecné otázky.
     if (intent.webByNature && !input.retrievedChunks.length) {
       // špecifickejšie hlášky podľa intentu
@@ -295,7 +328,7 @@ export class GroqProvider implements AIProvider {
       };
     }
 
-    // 5) Offerings – iba keď to fakt vyzerá, že sa pýta na „naše služby“
+    // 6) Offerings – iba keď to fakt vyzerá, že sa pýta na „naše služby“
     if (intent.offerings && offers.length > 0) {
       const top = offers.slice(0, 6);
 
@@ -318,46 +351,12 @@ export class GroqProvider implements AIProvider {
       };
     }
 
-    // 6) Špecifické služby (translation/transcription/content/analytics/assistant)
+    // 7) Špecifické služby (translation/transcription/content/analytics/assistant)
     if (intent.translation) return this.replyForOfferKey(input, offers, sources, 'translation');
     if (intent.transcription) return this.replyForOfferKey(input, offers, sources, 'transcription');
     if (intent.contentGeneration) return this.replyForOfferKey(input, offers, sources, 'content');
     if (intent.analytics) return this.replyForOfferKey(input, offers, sources, 'analytics');
     if (intent.webAssistant) return this.replyForOfferKey(input, offers, sources, 'assistant');
-
-    // 7) Blog: „najnovší“ vs „relevantný“
-    if (intent.latestBlog || intent.blog) {
-      const picked = this.pickBlogSource(input, intent.latestBlog ? 'latest' : 'relevant');
-
-      if (picked) {
-        if (intent.latestBlog && !picked.isCertainLatest) {
-          return {
-            text: slovak
-              ? `Nevidím spoľahlivo dátumy publikovania v zosynchronizovanom obsahu, takže neviem na 100% určiť *posledný pridaný* článok. Ako dobrý tip z dostupných zdrojov: ${picked.title}. Chcete odkaz?`
-              : `I can't reliably see publish dates in the synced content, so I can’t be 100% sure about the latest article. A good pick from available sources: ${picked.title}. Want the link?`,
-            sources: [{ title: picked.title, url: picked.url }],
-            provider: `groq:${env.GROQ_MODEL}:local`,
-          };
-        }
-
-        return {
-          text: slovak
-            ? `${intent.latestBlog ? 'Najnovší článok je' : 'Najrelevantnejší článok je'}: ${picked.title}. Chcete krátke zhrnutie alebo odkaz?`
-            : `${intent.latestBlog ? 'The latest article is' : 'The most relevant article is'}: ${picked.title}. Want a short summary or the link?`,
-          sources: [{ title: picked.title, url: picked.url }],
-          provider: `groq:${env.GROQ_MODEL}:local`,
-        };
-      }
-
-      // keď blog intent je true, ale nič sme nevybrali, vráť rozumný fallback
-      return {
-        text: slovak
-          ? 'Článok k tomu v zosynchronizovanom obsahu neviem teraz spoľahlivo vybrať. Skúste prosím názov témy/článku (alebo slovo z nadpisu).'
-          : 'I can’t reliably pick an article from the synced content right now. Please share the topic or a keyword from the title.',
-        sources: [],
-        provider: `groq:${env.GROQ_MODEL}:local`,
-      };
-    }
 
     // 8) Kontakt: ak máme aspoň 1 zdroj a intent je contact, nasmeruj.
     if (intent.contact && input.retrievedChunks.length && sources.length > 0) {
@@ -501,48 +500,86 @@ export class GroqProvider implements AIProvider {
     input: GenerateReplyInput,
     mode: 'latest' | 'relevant',
   ): { title: string; url: string; isCertainLatest: boolean } | null {
-    const candidates: Array<{ title: string; url: string; dateMs: number | null; score: number }> = [];
+    const candidates: Array<{
+      title: string;
+      url: string;
+      dateMs: number | null;
+      score: number;
+      matchScore: number;
+      index: number;
+    }> = [];
+    const query = this.normalizeQuestion(input.question);
+    const queryTerms = this.extractMeaningfulTerms(input.question);
 
-    for (const chunk of input.retrievedChunks) {
+    input.retrievedChunks.forEach((chunk, index) => {
       const type = this.normalizeQuestion(chunk.metadata?.type || '');
       const url = chunk.metadata?.url?.trim() || '';
-      if (!url) continue;
+      if (!url) return;
 
       const isPost = type === 'post' || type === 'article' || type.includes('post');
-      if (!isPost) continue;
+      if (!isPost) return;
 
       const title = chunk.metadata?.title?.trim() || 'Článok';
-
       const meta = (chunk.metadata ?? {}) as Record<string, unknown>;
+      const slug = typeof meta['slug'] === 'string' ? meta['slug'] : '';
+      const titleNormalized = this.normalizeQuestion(title);
+      const slugNormalized = this.normalizeQuestion(slug);
+      const contentNormalized = this.normalizeQuestion(chunk.content.slice(0, 2000));
+      const haystack = `${titleNormalized} ${slugNormalized} ${contentNormalized}`.trim();
+
+      let matchScore = 0;
+
+      if (query && titleNormalized) {
+        if (titleNormalized === query) matchScore += 140;
+        else if (titleNormalized.includes(query) || query.includes(titleNormalized)) matchScore += 100;
+      }
+
+      for (const term of queryTerms) {
+        if (titleNormalized.includes(term)) matchScore += 24;
+        if (slugNormalized.includes(term)) matchScore += 14;
+        if (contentNormalized.includes(term)) matchScore += 5;
+      }
+
+      if (queryTerms.length > 1 && queryTerms.every((term) => haystack.includes(term))) {
+        matchScore += 35;
+      }
 
       const dateMs = this.parseDateMaybe(
-        meta['date'] ?? meta['publishedAt'] ?? meta['modifiedAt']
+        meta['date'] ??
+        meta['publishedAt'] ??
+        meta['published_at'] ??
+        meta['modifiedAt'] ??
+        meta['modified_at'] ??
+        meta['modified_gmt'] ??
+        meta['wp_updated_at'] ??
+        meta['updated_at'] ??
+        meta['last_synced_at']
       );
 
       const score = typeof meta['score'] === 'number' ? (meta['score'] as number) : 0;
 
-      candidates.push({ title, url, dateMs, score });
-    }
+      candidates.push({ title, url, dateMs, score, matchScore, index });
+    });
 
     if (!candidates.length) return null;
 
     if (mode === 'latest') {
       const withDates = candidates.filter((c) => c.dateMs !== null) as Array<{
-        title: string; url: string; dateMs: number; score: number;
+        title: string; url: string; dateMs: number; score: number; matchScore: number;
       }>;
 
       if (withDates.length) {
-        withDates.sort((a, b) => b.dateMs - a.dateMs);
+        withDates.sort((a, b) => b.dateMs - a.dateMs || b.matchScore - a.matchScore || b.score - a.score);
         return { title: withDates[0].title, url: withDates[0].url, isCertainLatest: true };
       }
 
       // nemáme dátumy -> vieme len tipnúť „jeden z posledných“, nie tvrdiť najnovší
       // vyber “najrelevantnejší” ako kandidát
-      candidates.sort((a, b) => (b.score || 0) - (a.score || 0));
+      candidates.sort((a, b) => b.matchScore - a.matchScore || b.score - a.score || a.index - b.index);
       return { title: candidates[0].title, url: candidates[0].url, isCertainLatest: false };
     }
 
-    candidates.sort((a, b) => (b.score || 0) - (a.score || 0));
+    candidates.sort((a, b) => b.matchScore - a.matchScore || b.score - a.score || (b.dateMs || 0) - (a.dateMs || 0) || a.index - b.index);
     return { title: candidates[0].title, url: candidates[0].url, isCertainLatest: false };
   }
 
@@ -581,8 +618,10 @@ export class GroqProvider implements AIProvider {
   private detectIntent(questionInput: string): AssistantIntent {
     const q = this.normalizeQuestion(questionInput);
 
-    const blog = /\b(blog|clanok|clanky|article|post)\b/u.test(q);
-    const latestBlog = blog && /\b(najnovsi|najnovsie|latest|novy|novsia|posledny|posledna|posledne)\b/u.test(q);
+    const explicitBlog = /\b(blog|clanok|clanky|article|post)\b/u.test(q);
+    const articleTitleLike = this.isArticleTitleLikeQuestion(q);
+    const blog = explicitBlog || articleTitleLike;
+    const latestBlog = blog && /\b(najnovsi|najnovsie|latest|novy|nova|nove|novsia|posledny|posledna|posledne)\b/u.test(q);
 
     const greeting = this.isGreeting(q);
     const availability = this.isAvailabilityQuestion(q);
@@ -591,15 +630,15 @@ export class GroqProvider implements AIProvider {
     const brief = this.isBriefQuestion(q);
     const contact = this.isContactQuestion(q);
 
-    const translation = this.isTranslationQuestion(q);
-    const transcription = this.isTranscriptionQuestion(q);
-    const contentGeneration = this.isContentGenerationQuestion(q);
-    const analytics = this.isAnalyticsQuestion(q);
-    const webAssistant = this.isWebAssistantQuestion(q);
+    const translation = !blog && this.isTranslationQuestion(q);
+    const transcription = !blog && this.isTranscriptionQuestion(q);
+    const contentGeneration = !blog && this.isContentGenerationQuestion(q);
+    const analytics = !blog && this.isAnalyticsQuestion(q);
+    const webAssistant = !blog && this.isWebAssistantQuestion(q);
 
-    const app = this.isAppQuestion(q);
+    const app = !blog && this.isAppQuestion(q);
 
-    const offerings = this.isOwnOfferingsQuestion(q);
+    const offerings = !blog && this.isOwnOfferingsQuestion(q);
 
     // Web-by-nature = len keď sa pýta na tvoj web / tvoje služby / blog / kontakt / brief
     const webByNature =
@@ -665,9 +704,15 @@ export class GroqProvider implements AIProvider {
 
   private isOwnOfferingsQuestion(q: string): boolean {
     // PRÍSNEJŠIE: musí byť jasné, že sa pýta na "vaše" + "služby/nástroje/produkty"
-    const aboutYou = /\b(vas|vase|u vas|na vasom webe|ponukate|ponuka|nastroje ai|nastroje-ai)\b/u.test(q);
+    const aboutYou =
+      /\b(vas|vase|u vas|na vasom webe|ponukate|ponuka)\b/u.test(q) ||
+      (/\b(nastroje ai|nastroje-ai|nastrojeai)\b/u.test(q) && /\b(sluzby|sluzba|ponukate|ponuka|produkty|riesenia)\b/u.test(q));
     const offeringWord = /\b(sluzby|sluzba|nastroj|nastroje|produkt|produkty|riesenie|riesenia|app|apka|aplikacia|aplikacie)\b/u.test(q);
     return aboutYou && offeringWord;
+  }
+
+  private isArticleTitleLikeQuestion(q: string): boolean {
+    return /\b(kybernetick|bezpecnost|bezpecnosti|cyber|security|cybersecurity)\b/u.test(q);
   }
 
   private isAppQuestion(q: string): boolean {
@@ -733,6 +778,43 @@ export class GroqProvider implements AIProvider {
       .replace(/[^\p{L}\p{N}\s]/gu, ' ')
       .replace(/\s+/g, ' ')
       .trim();
+  }
+
+  private extractMeaningfulTerms(value: string): string[] {
+    const stopWords = new Set([
+      'a',
+      'aj',
+      'ako',
+      'blog',
+      'clanok',
+      'clanky',
+      'co',
+      'je',
+      'na',
+      'najnovsi',
+      'najnovsie',
+      'nastroje',
+      'novy',
+      'nova',
+      'nove',
+      'o',
+      'posledny',
+      'posledna',
+      'posledne',
+      'the',
+      'v',
+      'vi',
+      'ai',
+    ]);
+
+    return Array.from(
+      new Set(
+        this.normalizeQuestion(value)
+          .split(' ')
+          .map((term) => term.trim())
+          .filter((term) => term.length >= 3 && !stopWords.has(term)),
+      ),
+    );
   }
 
   private isLowValueSource(title: string, url: string): boolean {
