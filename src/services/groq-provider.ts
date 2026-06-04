@@ -281,8 +281,8 @@ export class GroqProvider implements AIProvider {
     if (this.isDemoToolsQuestion(input.question)) {
       return {
         text: slovak
-          ? 'Áno. Ukážkové AI nástroje nájdete na stránke Služby. Sú tam: Pokročilá analýza dát, Automatické prepisovanie textu, Generátor obsahu, Preklad textu a Web asistent. Ak potrebujete niečo presne pre vašu firmu, vieme to riešiť ako AI na mieru cez konzultáciu.'
-          : 'Yes. Demo AI tools are on the Services page: Advanced data analysis, Automatic transcription, Content generator, Text translation, and Web assistant. If you need something specific for your business, we can handle it as a custom AI setup.',
+          ? 'Áno. Ukážkové AI nástroje nájdete na stránke Služby; na testovanie je potrebné sa prihlásiť alebo vytvoriť účet. Sú tam: Pokročilá analýza dát, Automatické prepisovanie textu, Generátor obsahu, Preklad textu a Web asistent. Výstupy berte ako orientačnú pomoc, nevkladajte citlivé údaje a dôležité výsledky si overte. Ak potrebujete niečo presne pre vašu firmu, vieme to riešiť ako AI na mieru cez konzultáciu.'
+          : 'Yes. Demo AI tools are on the Services page; testing requires signing in or creating an account. They include advanced data analysis, automatic transcription, content generator, text translation, and web assistant. Treat outputs as guidance, do not enter sensitive data, and verify important results. If you need something specific for your business, we can handle it as a custom AI setup.',
         sources: [servicesSource],
         provider: `groq:${env.GROQ_MODEL}:local`,
       };
@@ -380,8 +380,8 @@ export class GroqProvider implements AIProvider {
     if (intent.offerings) {
       return {
         text: slovak
-          ? 'Na stránke Služby ponúkame: AI na mieru, Odporúčanie + nastavenie, Pokročilú analýzu dát, Automatické prepisovanie textu, Generátor obsahu, Preklad textu a Web asistenta. Pre malú firmu alebo e-shop vieme odporučiť vhodný postup a prípadne pripraviť AI riešenie na mieru podľa vašich procesov.'
-          : 'On the Services page we offer: custom AI, recommendation and setup, advanced data analysis, automatic transcription, content generator, text translation, and web assistant. For a small business or e-shop, we can recommend the right setup and prepare a custom AI solution for your workflow.',
+          ? 'Na stránke Služby ponúkame: AI na mieru, Odporúčanie + nastavenie, Pokročilú analýzu dát, Automatické prepisovanie textu, Generátor obsahu, Preklad textu a Web asistenta. Nástroje na testovanie sú dostupné po prihlásení alebo registrácii. Pri práci s AI nevkladajte citlivé údaje a dôležité výstupy si overte. Pre malú firmu alebo e-shop vieme odporučiť vhodný postup a prípadne pripraviť AI riešenie na mieru podľa vašich procesov.'
+          : 'On the Services page we offer: custom AI, recommendation and setup, advanced data analysis, automatic transcription, content generator, text translation, and web assistant. Tools for testing are available after sign-in or registration. Do not enter sensitive data into AI tools and verify important outputs. For a small business or e-shop, we can recommend the right setup and prepare a custom AI solution for your workflow.',
         sources: [servicesSource],
         provider: `groq:${env.GROQ_MODEL}:local`,
       };
