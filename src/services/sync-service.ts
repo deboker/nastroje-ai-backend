@@ -35,6 +35,7 @@ export class SyncService {
           slug: string;
           type: string;
           wp_object_id: number;
+          wp_updated_at?: string;
         };
       }> = [];
 
@@ -59,6 +60,7 @@ export class SyncService {
               slug: document.slug,
               type: document.type,
               wp_object_id: document.wp_object_id,
+              wp_updated_at: document.updated_at,
             },
           });
         });

@@ -84,6 +84,10 @@ export class DocumentRepository {
     const searchIntent = this.detectSearchIntent(query);
     const searchTerms = this.expandSearchTerms(this.extractSearchTerms(query), searchIntent);
 
+    if (searchIntent.latestBlog) {
+      return this.searchLatestBlogDocuments(siteId, limit);
+    }
+
     const { data, error } = await supabase
       .from('document_chunks')
       .select('id,document_id,chunk_index,content,metadata')
@@ -118,7 +122,7 @@ export class DocumentRepository {
 
     const { data: fallbackDocuments, error: fallbackError } = await supabase
       .from('documents')
-      .select('id,title,slug,url,excerpt,content_clean,type')
+      .select('id,title,slug,url,excerpt,content_clean,type,metadata,last_synced_at')
       .eq('site_id', siteId)
       .or(filters.join(','))
       .limit(Math.max(limit * 5, 10));
@@ -137,10 +141,54 @@ export class DocumentRepository {
         url: document.url,
         slug: document.slug,
         type: document.type,
+        wp_updated_at: this.getMetadataDate(document.metadata, 'wp_updated_at'),
+        last_synced_at: document.last_synced_at,
       },
     }));
 
     return this.rankChunkResults(mappedFallbackResults, searchTerms, searchIntent, limit);
+  }
+
+  private async searchLatestBlogDocuments(siteId: string, limit: number) {
+    const { data, error } = await supabase
+      .from('documents')
+      .select('id,title,slug,url,excerpt,content_clean,type,metadata,last_synced_at')
+      .eq('site_id', siteId)
+      .eq('status', 'publish')
+      .in('type', ['post', 'article'])
+      .limit(Math.max(limit * 10, 30));
+
+    if (error) {
+      throw error;
+    }
+
+    return (data ?? [])
+      .map((document, index) => {
+        const wpUpdatedAt = this.getMetadataDate(document.metadata, 'wp_updated_at');
+        const dateMs = this.parseDateMaybe(wpUpdatedAt ?? document.last_synced_at);
+
+        return {
+          result: {
+            id: `document-${document.id}`,
+            document_id: document.id,
+            chunk_index: index,
+            content: (document.excerpt || document.content_clean || document.title || '').slice(0, 900),
+            metadata: {
+              title: document.title,
+              url: document.url,
+              slug: document.slug,
+              type: document.type,
+              wp_updated_at: wpUpdatedAt,
+              last_synced_at: document.last_synced_at,
+            },
+          },
+          dateMs,
+          index,
+        };
+      })
+      .sort((left, right) => (right.dateMs || 0) - (left.dateMs || 0) || left.index - right.index)
+      .slice(0, limit)
+      .map((entry) => entry.result);
   }
 
   private extractSearchTerms(query: string): string[] {
@@ -265,6 +313,10 @@ export class DocumentRepository {
       );
     }
 
+    if (intent.blog) {
+      ['blog', 'clanok', 'clanky', 'article', 'post'].forEach((term) => expanded.add(term));
+    }
+
     if (intent.translation) {
       ['preklad', 'preklad textu', 'textu'].forEach((term) => expanded.add(term));
     }
@@ -360,6 +412,18 @@ export class DocumentRepository {
       score -= 26;
     }
 
+    if (intent.blog && type === 'post') {
+      score += 34;
+    }
+
+    if (intent.blog && type === 'article') {
+      score += 34;
+    }
+
+    if (intent.blog && type === 'page') {
+      score -= 18;
+    }
+
     if (this.matchesAnyKeyword([slug, title, url], ['sluzby', 'analytika', 'prepis reci', 'prepis-reci', 'generator obsahu', 'generator-obsahu', 'preklad textu', 'preklad-textu', 'web asistent', 'web-asistent'])) {
       score += 70;
     }
@@ -431,15 +495,19 @@ export class DocumentRepository {
     const normalized = this.normalizeSearchText(query);
 
     const includesAny = (terms: string[]) => terms.some((term) => normalized.includes(this.normalizeSearchText(term)));
+    const blog = includesAny(['blog', 'clanok', 'článok', 'clanky', 'články', 'article', 'post', 'kybernetick', 'bezpecnost', 'bezpečnost', 'cyber', 'security']);
+    const latestBlog = blog && includesAny(['najnovsi', 'najnovší', 'najnovsie', 'najnovšie', 'novy', 'nový', 'nova', 'nová', 'nove', 'nové', 'posledny', 'posledný', 'posledna', 'posledná', 'posledne', 'posledné', 'latest']);
 
     return {
-      offerings: includesAny(['vase', 'vaše', 'vas', 'ponukate', 'ponúkate', 'mate', 'máte', 'sluzby', 'služby', 'app', 'aplikacia', 'aplikácie', 'nastroj', 'nástroj', 'nastroje', 'nástroje']),
-      translation: includesAny(['preklad', 'preklad textu', 'translate', 'translator']),
-      transcription: includesAny(['prepis', 'prepisovanie', 'transkript', 'audio', 'video']),
-      contentGeneration: includesAny(['generator obsahu', 'obsah', 'copy', 'texty', 'clanky', 'články', 'emaily']),
-      analytics: includesAny(['analytika', 'analyza', 'analýza', 'data', 'reporting']),
-      webAssistant: includesAny(['web asistent', 'asistent', 'chatbot']),
+      offerings: !blog && includesAny(['vase', 'vaše', 'vas', 'ponukate', 'ponúkate', 'mate', 'máte', 'sluzby', 'služby', 'app', 'aplikacia', 'aplikácie', 'nastroj', 'nástroj', 'nastroje', 'nástroje']),
+      translation: !blog && includesAny(['preklad', 'preklad textu', 'translate', 'translator']),
+      transcription: !blog && includesAny(['prepis', 'prepisovanie', 'transkript', 'audio', 'video']),
+      contentGeneration: !blog && includesAny(['generator obsahu', 'obsah', 'copy', 'texty', 'clanky', 'články', 'emaily']),
+      analytics: !blog && includesAny(['analytika', 'analyza', 'analýza', 'data', 'reporting']),
+      webAssistant: !blog && includesAny(['web asistent', 'asistent', 'chatbot']),
       contactLike: includesAny(['kontakt', 'contact', 'email', 'formular', 'form']),
+      latestBlog,
+      blog,
     };
   }
 
@@ -468,6 +536,24 @@ export class DocumentRepository {
       .replace(/\s+/g, ' ')
       .trim();
   }
+
+  private getMetadataDate(metadata: unknown, key: string): string | null {
+    if (!metadata || typeof metadata !== 'object' || !(key in metadata)) {
+      return null;
+    }
+
+    const value = (metadata as Record<string, unknown>)[key];
+    return typeof value === 'string' && value.trim() ? value : null;
+  }
+
+  private parseDateMaybe(value: unknown): number | null {
+    if (!value) return null;
+    if (typeof value === 'number' && Number.isFinite(value)) return value > 10_000_000_000 ? value : value * 1000;
+    if (typeof value !== 'string') return null;
+
+    const ms = Date.parse(value);
+    return Number.isFinite(ms) ? ms : null;
+  }
 }
 
 type SearchIntent = {
@@ -478,4 +564,6 @@ type SearchIntent = {
   analytics: boolean;
   webAssistant: boolean;
   contactLike: boolean;
+  latestBlog: boolean;
+  blog: boolean;
 };

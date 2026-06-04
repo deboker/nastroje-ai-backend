@@ -5,6 +5,7 @@ type AssistantIntent = {
   greeting: boolean;
   availability: boolean;
   capability: boolean;
+  identity: boolean;
 
   brief: boolean;
   contact: boolean;
@@ -139,6 +140,12 @@ export class GroqProvider implements AIProvider {
     const systemPrompt = [
       `You are ${input.assistantName}, a helpful website assistant for a specific business website.`,
       `Reply ONLY in ${languageName}.`,
+      ...(this.isSlovak(input.language)
+        ? [
+          `Use clean Slovak only. Do not use Czech words, Czech grammar, or mixed Czech-Slovak wording.`,
+          `Prefer Slovak forms such as "som", "môj", "moja úloha", "pomôcť", "užitočné", "otázka", "odpoveď".`,
+        ]
+        : []),
       `Use a ${input.tone} tone.`,
       `Be concise, practical, and natural.`,
       `If the user asks about this website's own offerings, base answers ONLY on the provided website context.`,
@@ -241,11 +248,11 @@ export class GroqProvider implements AIProvider {
     }
 
     // 2) Capability – krátke
-    if (intent.capability) {
+    if (intent.capability || intent.identity) {
       return {
         text: slovak
-          ? 'Viem pomôcť nájsť správnu službu/článok na webe nastroje-ai.sk a nasmerovať vás na ďalší krok (brief alebo kontakt).'
-          : 'I can help you find the right service/article on the website and guide you to the next step (brief or contact).',
+          ? 'Som AI asistent, teda umelá inteligencia pre web nastroje-ai.sk. Pomáham nájsť služby, články alebo prejsť krátky brief. Nie som človek a pri dôležitých veciach si informácie radšej overte.'
+          : 'I am an AI assistant for the nastroje-ai.sk website. I can help find services, articles, or guide you through a short brief. I am not a human, so verify important information.',
         sources: [],
         provider: `groq:${env.GROQ_MODEL}:local`,
       };
@@ -595,7 +602,9 @@ export class GroqProvider implements AIProvider {
     if (!this.isSlovak(input.language)) return text;
 
     const normalized = this.normalizeQuestion(text);
-    if (!this.looksIndonesian(normalized)) return text;
+    const slovakText = this.fixCommonCzechSlovakMix(text);
+    const normalizedSlovakText = this.normalizeQuestion(slovakText);
+    if (!this.looksIndonesian(normalizedSlovakText)) return slovakText;
 
     const question = this.normalizeQuestion(input.question);
 
@@ -626,6 +635,7 @@ export class GroqProvider implements AIProvider {
     const greeting = this.isGreeting(q);
     const availability = this.isAvailabilityQuestion(q);
     const capability = this.isCapabilityQuestion(q);
+    const identity = this.isIdentityQuestion(q);
 
     const brief = this.isBriefQuestion(q);
     const contact = this.isContactQuestion(q);
@@ -658,6 +668,7 @@ export class GroqProvider implements AIProvider {
       greeting,
       availability,
       capability,
+      identity,
 
       brief,
       contact,
@@ -688,6 +699,22 @@ export class GroqProvider implements AIProvider {
 
   private isCapabilityQuestion(q: string): boolean {
     return ['co vies', 'ako vies pomoct', 'pomoc', 'help', 'what can you do', 'what do you do'].includes(q);
+  }
+
+  private isIdentityQuestion(q: string): boolean {
+    return [
+      'kto si',
+      'kto si ty',
+      'co si',
+      'co si ty',
+      'si clovek',
+      'si ai',
+      'si umela inteligencia',
+      'who are you',
+      'what are you',
+      'are you ai',
+      'are you human',
+    ].includes(q);
   }
 
   private isBriefQuestion(q: string): boolean {
@@ -844,6 +871,46 @@ export class GroqProvider implements AIProvider {
 
   private looksIndonesian(value: string): boolean {
     return /\b(saya|adalah|maaf|anda|tidak|dapat|menemukan|konteks|relevan|menjawab|pertanyaan)\b/u.test(value);
+  }
+
+  private fixCommonCzechSlovakMix(text: string): string {
+    const replacements: Array<[RegExp, string]> = [
+      [/\bMým úlohou je\b/g, 'Mojou úlohou je'],
+      [/\bmým úlohou je\b/g, 'mojou úlohou je'],
+      [/\bMůj úlohou je\b/g, 'Mojou úlohou je'],
+      [/\bmůj úlohou je\b/g, 'mojou úlohou je'],
+      [/\bMôj úlohou je\b/g, 'Mojou úlohou je'],
+      [/\bmôj úlohou je\b/g, 'mojou úlohou je'],
+      [/\bJsem\b/g, 'Som'],
+      [/\bjsem\b/g, 'som'],
+      [/\bmůj\b/g, 'môj'],
+      [/\bMůj\b/g, 'Môj'],
+      [/\bmoje\b/g, 'moja'],
+      [/\bMoje\b/g, 'Moja'],
+      [/\bmým\b/g, 'mojím'],
+      [/\bMým\b/g, 'Mojím'],
+      [/\bužitečné\b/g, 'užitočné'],
+      [/\bUžitečné\b/g, 'Užitočné'],
+      [/\binformace\b/g, 'informácie'],
+      [/\bInformace\b/g, 'Informácie'],
+      [/\bodpověď\b/g, 'odpoveď'],
+      [/\bOdpověď\b/g, 'Odpoveď'],
+      [/\botázku\b/g, 'otázku'],
+      [/\bkteré\b/g, 'ktoré'],
+      [/\bKteré\b/g, 'Ktoré'],
+      [/\bkterý\b/g, 'ktorý'],
+      [/\bKterý\b/g, 'Ktorý'],
+      [/\bkterá\b/g, 'ktorá'],
+      [/\bKterá\b/g, 'Ktorá'],
+      [/\bnacházejí\b/g, 'nachádzajú'],
+      [/\bNacházejí\b/g, 'Nachádzajú'],
+      [/\btéto\b/g, 'tejto'],
+      [/\bTéto\b/g, 'Tejto'],
+      [/\bstránce\b/g, 'stránke'],
+      [/\bStránce\b/g, 'Stránke'],
+    ];
+
+    return replacements.reduce((nextText, [pattern, replacement]) => nextText.replace(pattern, replacement), text);
   }
 
   private parseDateMaybe(value: unknown): number | null {
