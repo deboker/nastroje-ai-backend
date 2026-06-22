@@ -163,7 +163,7 @@ export class DocumentRepository {
 
     const { data: productDocuments, error: documentsError } = await supabase
       .from('documents')
-      .select('id,title,slug,url,excerpt,content_clean')
+      .select('id,title,slug,url,excerpt,content_clean,metadata')
       .eq('site_id', siteId)
       .eq('type', 'product')
       .eq('status', 'publish');
@@ -352,18 +352,68 @@ export class DocumentRepository {
   }
 
   private scoreColourbondProductDocument(
-    document: { title: string; slug: string; excerpt: string; content_clean: string },
+    document: { title: string; slug: string; excerpt: string; content_clean: string; metadata?: unknown },
     searchTerms: string[],
   ): number {
     const title = this.normalizeSearchText(document.title);
     const searchable = this.normalizeSearchText(
-      `${document.title} ${document.slug} ${document.excerpt} ${document.content_clean}`,
+      `${document.title} ${document.slug} ${document.excerpt} ${document.content_clean} ${this.getProductCategory(document.metadata)}`,
     );
-
-    return searchTerms.reduce((score, term) => {
-      if (!searchable.includes(term)) return score;
-      return score + (title.includes(term) ? 12 : 4);
+    const query = searchTerms.join(' ');
+    const asksForAdhesiveOrStone = /\b(lepidl\w*|lepeni|kamen\w*|jolly hran\w*|viditelne spoj\w*)\b/u.test(query);
+    const asksForAccessories = /\b(prislusenstv\w*|kartus\w*|pistol\w*|trysk\w*|aplikac\w*)\b/u.test(query);
+    let score = searchTerms.reduce((total, term) => {
+      if (!searchable.includes(term)) return total;
+      return total + (title.includes(term) ? 12 : 4);
     }, 0);
+
+    if (asksForAdhesiveOrStone) {
+      if (searchable.includes('lepidla a tmely')) score += 30;
+      score += this.countExactPhraseMatches(searchable, 'lepidlo') * 12;
+      score += this.countExactPhraseMatches(searchable, 'lepeni') * 10;
+      score += this.countExactPhraseMatches(searchable, 'prirodni kamen') * 10;
+      score += this.countExactPhraseMatches(searchable, 'umely kamen') * 10;
+      score += this.countExactPhraseMatches(searchable, 'jolly hran') * 12;
+      score += this.countExactPhraseMatches(searchable, 'viditelne spoje') * 12;
+      score += this.preferredColourbondAdhesiveTitleBoost(title);
+
+      if (!asksForAccessories && /\b(pistol\w*|trysk\w*|koncovka|kartus\w*|aplikac\w*)\b/u.test(title)) {
+        score -= 80;
+      }
+    }
+
+    return score;
+  }
+
+  private getProductCategory(metadata: unknown): string {
+    if (!isRecord(metadata)) return '';
+    const category = metadata.category_name;
+    return typeof category === 'string' ? category : '';
+  }
+
+  private preferredColourbondAdhesiveTitleBoost(title: string): number {
+    const boosts: Record<string, number> = {
+      'colour bond p 6min': 180,
+      'akepox 5010': 170,
+      'akepox 2040': 160,
+      'platinum maxi power tekute': 150,
+      'platinum maxi power': 145,
+      'akenova rocket 200': 120,
+      'akenova elastic 100': 115,
+    };
+
+    return boosts[title] ?? 0;
+  }
+
+  private countExactPhraseMatches(value: string, phrase: string): number {
+    let count = 0;
+    let offset = 0;
+    while (true) {
+      const foundAt = value.indexOf(phrase, offset);
+      if (foundAt === -1) return Math.min(count, 3);
+      count += 1;
+      offset = foundAt + phrase.length;
+    }
   }
 
   private expandSearchTerms(terms: string[], intent: SearchIntent): string[] {
