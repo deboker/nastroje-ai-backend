@@ -95,8 +95,8 @@ const OFFERING_CATALOG: Array<{
 export class GroqProvider implements AIProvider {
   async generateReply(input: GenerateReplyInput): Promise<GenerateReplyResult> {
     const sources = this.collectSources(input);
-    if (input.strictProductGrounding && this.isProductRecommendationQuestion(input.question)) {
-      return this.buildGroundedProductRecommendation(input, sources);
+    if (input.strictSiteGrounding) {
+      return this.buildGroundedColourbondReply(input, sources);
     }
 
     if (!env.GROQ_API_KEY) throw new Error('GROQ_API_KEY is missing.');
@@ -217,23 +217,39 @@ export class GroqProvider implements AIProvider {
     return contextSections.join(' ');
   }
 
-  private buildGroundedProductRecommendation(
+  private buildGroundedColourbondReply(
     input: GenerateReplyInput,
     sources: Array<{ title: string; url: string }>,
   ): GenerateReplyResult {
+    if (this.isGreeting(this.normalizeQuestion(input.question))) {
+      return {
+        text: `Dobrý den, jsem ${input.assistantName}. Mohu poradit pouze podle produktů dostupných v katalogu Colourbond.cz.`,
+        sources: [],
+        provider: `groq:${env.GROQ_MODEL}:grounded-colourbond-guard`,
+      };
+    }
+
     if (!input.retrievedChunks.length || !sources.length) {
       return {
         text: 'V dostupných podkladech nemám dost informací k doporučení konkrétního produktu. Doporučuji kontaktovat prodejce.',
         sources: [],
-        provider: `groq:${env.GROQ_MODEL}:grounded-product-guard`,
+        provider: `groq:${env.GROQ_MODEL}:grounded-colourbond-guard`,
       };
     }
 
     const productTitles = Array.from(new Set(sources.map((source) => source.title))).slice(0, 3);
+    if (!this.isProductRecommendationQuestion(input.question)) {
+      return {
+        text: `V dostupných podkladech jsem našel relevantní produkty: ${productTitles.join(', ')}. Pro další ověření vhodnosti produktu doporučuji otevřít jeho detail nebo kontaktovat prodejce.`,
+        sources,
+        provider: `groq:${env.GROQ_MODEL}:grounded-colourbond-guard`,
+      };
+    }
+
     return {
       text: `V dostupných podkladech jsem našel relevantní produkty: ${productTitles.join(', ')}. Pro ověření vhodnosti pro konkrétní použití doporučuji porovnat popis produktu nebo kontaktovat prodejce.`,
       sources,
-      provider: `groq:${env.GROQ_MODEL}:grounded-product-guard`,
+      provider: `groq:${env.GROQ_MODEL}:grounded-colourbond-guard`,
     };
   }
 
