@@ -96,6 +96,7 @@ export class ChatService {
       conversation_id: conversation.id,
       reply: reply.text,
       sources: reply.sources,
+      products: reply.products ?? [],
       provider: reply.provider,
     };
   }
