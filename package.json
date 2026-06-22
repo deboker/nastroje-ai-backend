@@ -8,7 +8,8 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "onboard:colourbond": "tsx scripts/onboard-colourbond-site.ts",
-    "rotate:colourbond-token": "tsx scripts/rotate-colourbond-site-token.ts"
+    "rotate:colourbond-token": "tsx scripts/rotate-colourbond-site-token.ts",
+    "import:colourbond-products": "tsx scripts/import-colourbond-products.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.46.1",
