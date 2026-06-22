@@ -93,6 +93,17 @@ export class SiteRepository {
   }
 
   async upsertSiteSettings(siteId: string, input: SiteSettingsRecord): Promise<SiteSettingsRecord> {
+    const { data: existingSettings, error: existingSettingsError } = await supabase
+      .from('site_settings')
+      .select('sync_config')
+      .eq('site_id', siteId)
+      .maybeSingle();
+
+    if (existingSettingsError) {
+      throw existingSettingsError;
+    }
+
+    const syncConfig = preserveAiConfig(existingSettings?.sync_config, input.sync_config);
     const { data, error } = await supabase
       .from('site_settings')
       .upsert(
@@ -106,7 +117,7 @@ export class SiteRepository {
           shortcode_enabled: input.shortcode_enabled,
           lead_capture_enabled: input.lead_capture_enabled,
           lead_flow_config: input.lead_flow_config,
-          sync_config: input.sync_config,
+          sync_config: syncConfig,
         },
         {
           onConflict: 'site_id',
@@ -380,4 +391,23 @@ export class SiteRepository {
     const [year, month, day] = isoDate.split('-');
     return `${day}.${month}.`;
   }
+}
+
+function preserveAiConfig(existingValue: unknown, incomingValue: SiteSettingsRecord['sync_config']) {
+  if (Object.prototype.hasOwnProperty.call(incomingValue, 'ai_config')) {
+    return incomingValue;
+  }
+
+  if (!isRecord(existingValue) || !Object.prototype.hasOwnProperty.call(existingValue, 'ai_config')) {
+    return incomingValue;
+  }
+
+  return {
+    ...incomingValue,
+    ai_config: existingValue.ai_config,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }

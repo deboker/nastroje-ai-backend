@@ -5,6 +5,7 @@ import { OpsRepository } from '../repositories/ops-repository.js';
 import type { SiteContext } from '../types/site-context.js';
 import type { AIProvider } from './ai-provider.js';
 import { RetrievalService } from './retrieval-service.js';
+import { resolveSiteAiConfig } from './site-ai-config.js';
 
 type ChatInput = {
   conversation_id?: string;
@@ -57,10 +58,12 @@ export class ChatService {
     const assistantName = input.assistant_name || siteContext.settings?.assistant_name || 'Nastroje AI Assistant';
     const language = input.language || siteContext.site.language || 'sk';
     const tone = input.tone || siteContext.settings?.tone || 'professional';
+    const aiConfig = resolveSiteAiConfig(siteContext.settings?.sync_config?.ai_config);
     const reply = await this.aiProvider.generateReply({
       assistantName,
       language,
       tone,
+      aiConfig,
       question: input.message,
       retrievedChunks,
       conversationHistory: recentMessages.map((message) => ({

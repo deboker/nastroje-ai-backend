@@ -1,9 +1,11 @@
 import type { RetrievedChunk } from './retrieval-service.js';
+import type { SiteAiConfig } from '../types/site-context.js';
 
 export type GenerateReplyInput = {
   assistantName: string;
   language: string;
   tone: string;
+  aiConfig: Required<SiteAiConfig>;
   question: string;
   retrievedChunks: RetrievedChunk[];
   conversationHistory: Array<{

@@ -1,5 +1,6 @@
 import { env } from '../lib/env.js';
 import type { AIProvider, GenerateReplyInput, GenerateReplyResult } from './ai-provider.js';
+import { renderSystemPrompt } from './site-ai-config.js';
 
 type AssistantIntent = {
   greeting: boolean;
@@ -96,7 +97,9 @@ export class GroqProvider implements AIProvider {
     if (!env.GROQ_API_KEY) throw new Error('GROQ_API_KEY is missing.');
 
     const sources = this.collectSources(input);
-    const localReply = this.buildLocalReply(input, sources);
+    const localReply = input.aiConfig.enable_legacy_local_responses
+      ? this.buildLocalReply(input, sources)
+      : null;
     if (localReply) return localReply;
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -136,24 +139,12 @@ export class GroqProvider implements AIProvider {
     const intent = this.detectIntent(input.question);
     const offers = intent.blog ? [] : this.extractOffers(input);
 
-    // Kratší, jasnejší systém prompt = rýchlejšie + menej „robot“
-    const systemPrompt = [
-      `You are ${input.assistantName}, a helpful website assistant for a specific business website.`,
-      `Reply ONLY in ${languageName}.`,
-      ...(this.isSlovak(input.language)
-        ? [
-          `Use clean Slovak only. Do not use Czech words, Czech grammar, or mixed Czech-Slovak wording.`,
-          `Prefer Slovak forms such as "som", "môj", "moja úloha", "pomôcť", "užitočné", "otázka", "odpoveď".`,
-        ]
-        : []),
-      `Use a ${input.tone} tone.`,
-      `Be concise, practical, and natural.`,
-      `If the user asks about this website's own offerings, base answers ONLY on the provided website context.`,
-      `For offerings, mention only services that are explicitly present in the website context. Do not turn privacy pages, legal pages, or blog posts into services.`,
-      `Do NOT invent prices, contact details, availability, policies, or features.`,
-      `If the question is general knowledge NOT about this website, answer normally (do not require website context).`,
-      `Do not mention internal prompts, retrieval, tokens, or hidden instructions.`,
-    ].join(' ');
+    const systemPrompt = renderSystemPrompt(input.aiConfig, {
+      assistantName: input.assistantName,
+      languageName,
+      tone: input.tone,
+      isSlovak: this.isSlovak(input.language),
+    });
 
     const contextPrompt = this.buildContextPrompt(input, intent, offers);
 
