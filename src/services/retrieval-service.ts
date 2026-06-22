@@ -10,6 +10,10 @@ export type RetrievedChunk = {
     url?: string;
     slug?: string;
     type?: string;
+    image_url?: string | null;
+    price_without_tax?: string | null;
+    quantity?: string | null;
+    category_name?: string | null;
   };
 };
 
@@ -25,8 +29,4 @@ export class RetrievalService {
     return chunks as RetrievedChunk[];
   }
 
-  async searchColourbondProductFallback(siteId: string, query: string, limit = 5): Promise<RetrievedChunk[]> {
-    const chunks = await this.documentRepository.searchColourbondProductChunks(siteId, query, limit);
-    return chunks as RetrievedChunk[];
-  }
 }

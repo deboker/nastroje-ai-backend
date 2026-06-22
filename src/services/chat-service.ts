@@ -5,7 +5,6 @@ import { OpsRepository } from '../repositories/ops-repository.js';
 import type { SiteContext } from '../types/site-context.js';
 import type { AIProvider } from './ai-provider.js';
 import { RetrievalService } from './retrieval-service.js';
-import { resolveSiteAiConfig } from './site-ai-config.js';
 
 type ChatInput = {
   conversation_id?: string;
@@ -56,13 +55,11 @@ export class ChatService {
 
     const recentMessages = await this.conversationRepository.listRecentMessages(conversation.id, 8);
     const isColourbond = siteContext.site.public_site_key === COLOURBOND_PUBLIC_SITE_KEY;
-    let retrievedChunks = await this.retrievalService.searchRelevantContent(siteContext.site.id, input.message, 5);
-    if (isColourbond) {
-      const productChunks = await this.retrievalService.searchColourbondProductFallback(siteContext.site.id, input.message, 5);
-      if (productChunks.length > 0) {
-        retrievedChunks = productChunks;
-      }
+    if (!isColourbond) {
+      throw new HttpError(403, 'This backend is dedicated to Colourbond.cz.');
     }
+
+    const retrievedChunks = await this.retrievalService.searchRelevantContent(siteContext.site.id, input.message, 5);
     if (isColourbond) {
       console.info({
         type: 'colourbond_retrieval',
@@ -74,16 +71,7 @@ export class ChatService {
         ),
       });
     }
-    const assistantName = input.assistant_name || siteContext.settings?.assistant_name || 'Nastroje AI Assistant';
-    const language = input.language || siteContext.site.language || 'sk';
-    const tone = input.tone || siteContext.settings?.tone || 'professional';
-    const aiConfig = resolveSiteAiConfig(siteContext.settings?.sync_config?.ai_config);
     const reply = await this.aiProvider.generateReply({
-      assistantName,
-      language,
-      tone,
-      aiConfig,
-      strictSiteGrounding: isColourbond,
       question: input.message,
       retrievedChunks,
       conversationHistory: recentMessages.map((message) => ({
@@ -95,6 +83,7 @@ export class ChatService {
     await this.conversationRepository.createMessage(conversation.id, 'assistant', reply.text, {
       sources: reply.sources,
       provider: reply.provider,
+      products: reply.products ?? [],
     });
     await this.conversationRepository.touchConversation(conversation.id);
     await this.opsRepository.logUsage(siteContext.site.id, 'chat_message', {

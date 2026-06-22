@@ -1,9 +1,5 @@
 import { supabase } from '../lib/supabase.js';
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
-}
-
 export type SyncDocumentInput = {
   wp_object_id: number;
   type: string;
@@ -26,6 +22,40 @@ export type ChunkInsert = {
   metadata: Record<string, unknown>;
 };
 
+type ProductDocument = {
+  id: string;
+  title: string;
+  slug: string;
+  url: string;
+  excerpt: string;
+  content_clean: string;
+  metadata: unknown;
+};
+
+const STOP_WORDS = new Set([
+  'a', 'aby', 'ano', 'bych', 'co', 'do', 'i', 'jak', 'jaka', 'jake', 'jaky', 'je', 'jsou', 'k', 'mi', 'na',
+  'nebo', 'o', 'od', 'potrebuji', 'potrebuju', 'pro', 's', 'se', 'si', 'to', 'v', 've', 'z',
+]);
+
+const TERM_ALIASES: Record<string, string[]> = {
+  lepidlo: ['lepidlo', 'lepeni', 'lepenie'],
+  lepeni: ['lepidlo', 'lepeni', 'lepenie'],
+  lepenie: ['lepidlo', 'lepeni', 'lepenie'],
+  tmel: ['tmel', 'tmeleni', 'tmelenie'],
+  tmeleni: ['tmel', 'tmeleni', 'tmelenie'],
+  tmelenie: ['tmel', 'tmeleni', 'tmelenie'],
+  kamen: ['kamen', 'kamene', 'kamen'],
+  cistic: ['cistic', 'cisteni', 'cistenie', 'cistit', 'odmasteni'],
+  cisteni: ['cistic', 'cisteni', 'cistenie', 'cistit', 'odmasteni'],
+  cistenie: ['cistic', 'cisteni', 'cistenie', 'cistit', 'odmasteni'],
+  kartuse: ['kartuse', 'aplikace', 'pistole', 'tryska'],
+  pistole: ['pistole', 'aplikace', 'kartuse', 'tryska'],
+  tryska: ['tryska', 'pistole', 'kartuse', 'aplikace'],
+  prislusenstvi: ['prislusenstvi', 'tryska', 'pistole', 'kartuse', 'aplikace'],
+};
+
+const EXTERNAL_BRANDS = ['sikabond', 'masterseal'];
+
 export class DocumentRepository {
   async upsertDocuments(siteId: string, documents: SyncDocumentInput[]) {
     const payload = documents.map((document) => ({
@@ -39,684 +69,204 @@ export class DocumentRepository {
       content_raw: document.content_raw,
       content_clean: document.content_clean,
       status: document.status ?? 'publish',
-      metadata: {
-        ...(document.metadata ?? {}),
-        wp_updated_at: document.updated_at ?? null,
-      },
+      metadata: { ...(document.metadata ?? {}), wp_updated_at: document.updated_at ?? null },
       last_synced_at: new Date().toISOString(),
     }));
 
     const { data, error } = await supabase
       .from('documents')
-      .upsert(payload, {
-        onConflict: 'site_id,wp_object_id,type',
-      })
+      .upsert(payload, { onConflict: 'site_id,wp_object_id,type' })
       .select('id,site_id,wp_object_id,type,title,slug,url');
-
-    if (error) {
-      throw error;
-    }
-
+    if (error) throw error;
     return data ?? [];
   }
 
   async deleteChunks(siteId: string, documentIds: string[]) {
-    if (!documentIds.length) {
-      return;
-    }
-
+    if (!documentIds.length) return;
     const { error } = await supabase.from('document_chunks').delete().eq('site_id', siteId).in('document_id', documentIds);
-
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 
   async insertChunks(chunks: ChunkInsert[]) {
-    if (!chunks.length) {
-      return;
-    }
-
+    if (!chunks.length) return;
     const { error } = await supabase.from('document_chunks').insert(chunks);
-
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 
+  /** Returns only chunks belonging to the authenticated Colourbond site. */
   async searchChunks(siteId: string, query: string, limit = 5) {
-    const searchIntent = this.detectSearchIntent(query);
-    const searchTerms = this.expandSearchTerms(this.extractSearchTerms(query), searchIntent);
+    // The phpMyAdmin import has no embeddings. Deterministic keyword ranking is
+    // safer than PostgreSQL FTS here: it never maps an unknown brand to unrelated products.
+    return this.searchProductKeywords(siteId, query, limit);
+  }
 
-    if (searchIntent.latestBlog) {
-      return this.searchLatestBlogDocuments(siteId, limit);
-    }
+  private async searchProductKeywords(siteId: string, query: string, limit: number) {
+    const queryInfo = this.parseQuery(query);
+    if (
+      !queryInfo.terms.length ||
+      queryInfo.externalBrand ||
+      (queryInfo.kitchen && !queryInfo.worktop && !queryInfo.adhesive)
+    ) return [];
 
     const { data, error } = await supabase
-      .from('document_chunks')
-      .select('id,document_id,chunk_index,content,metadata')
-      .eq('site_id', siteId)
-      .textSearch('search_tsv', query, { type: 'websearch', config: 'simple' })
-      .limit(limit);
-
-    if (error) {
-      throw error;
-    }
-
-    if (data && data.length > 0) {
-      const rankedChunks = this.rankChunkResults(data, searchTerms, searchIntent, limit);
-      if (rankedChunks.length > 0) {
-        return rankedChunks;
-      }
-    }
-
-    if (!searchTerms.length) {
-      return [];
-    }
-
-    const filters: string[] = [];
-
-    for (const term of searchTerms) {
-      const escapedTerm = term.replace(/[%_,]/g, '');
-      filters.push(`title.ilike.%${escapedTerm}%`);
-      filters.push(`slug.ilike.%${escapedTerm}%`);
-      filters.push(`excerpt.ilike.%${escapedTerm}%`);
-      filters.push(`content_clean.ilike.%${escapedTerm}%`);
-    }
-
-    const { data: fallbackDocuments, error: fallbackError } = await supabase
-      .from('documents')
-      .select('id,title,slug,url,excerpt,content_clean,type,metadata,last_synced_at')
-      .eq('site_id', siteId)
-      .or(filters.join(','))
-      .limit(Math.max(limit * 5, 10));
-
-    if (fallbackError) {
-      throw fallbackError;
-    }
-
-    const mappedFallbackResults = (fallbackDocuments ?? []).map((document, index) => ({
-      id: `document-${document.id}`,
-      document_id: document.id,
-      chunk_index: index,
-      content: (document.excerpt || document.content_clean || document.title || '').slice(0, 900),
-      metadata: {
-        title: document.title,
-        url: document.url,
-        slug: document.slug,
-        type: document.type,
-        wp_updated_at: this.getMetadataDate(document.metadata, 'wp_updated_at'),
-        last_synced_at: document.last_synced_at,
-      },
-    }));
-
-    return this.rankChunkResults(mappedFallbackResults, searchTerms, searchIntent, limit);
-  }
-
-  /**
-   * Colourbond-only keyword fallback. It searches only this site's product documents,
-   * then returns their persisted chunks rather than manufacturing context from another site.
-   */
-  async searchColourbondProductChunks(siteId: string, query: string, limit = 5) {
-    const searchTerms = this.extractColourbondProductTerms(query);
-    if (!searchTerms.length) return [];
-
-    const { data: productDocuments, error: documentsError } = await supabase
       .from('documents')
       .select('id,title,slug,url,excerpt,content_clean,metadata')
       .eq('site_id', siteId)
       .eq('type', 'product')
       .eq('status', 'publish');
+    if (error) throw error;
 
-    if (documentsError) throw documentsError;
-
-    const rankedDocuments = (productDocuments ?? [])
-      .map((document) => ({
-        document,
-        score: this.scoreColourbondProductDocument(document, searchTerms),
-      }))
+    const ranked = ((data ?? []) as ProductDocument[])
+      .map((document) => ({ document, score: this.scoreProduct(document, queryInfo) }))
       .filter((entry) => entry.score > 0)
       .sort((left, right) => right.score - left.score || left.document.title.localeCompare(right.document.title))
       .slice(0, limit);
+    if (!ranked.length) return [];
 
-    if (!rankedDocuments.length) return [];
-
-    const documentIds = rankedDocuments.map((entry) => entry.document.id);
-    const { data: storedChunks, error: chunksError } = await supabase
+    const documentIds = ranked.map((entry) => entry.document.id);
+    const { data: chunks, error: chunksError } = await supabase
       .from('document_chunks')
       .select('id,document_id,chunk_index,content,metadata')
       .eq('site_id', siteId)
       .in('document_id', documentIds);
-
     if (chunksError) throw chunksError;
 
-    const chunksByDocumentId = new Map<string, Array<Record<string, unknown>>>();
-    for (const chunk of storedChunks ?? []) {
-      const existing = chunksByDocumentId.get(chunk.document_id) ?? [];
-      existing.push(chunk as Record<string, unknown>);
-      chunksByDocumentId.set(chunk.document_id, existing);
+    const byDocument = new Map<string, Array<Record<string, unknown>>>();
+    for (const chunk of chunks ?? []) {
+      const values = byDocument.get(chunk.document_id) ?? [];
+      values.push(chunk as Record<string, unknown>);
+      byDocument.set(chunk.document_id, values);
     }
 
     const results: Array<Record<string, unknown>> = [];
-    for (const { document } of rankedDocuments) {
-      const chunks = (chunksByDocumentId.get(document.id) ?? []).sort(
+    for (const { document } of ranked) {
+      const productMetadata = asRecord(document.metadata);
+      const productChunks = (byDocument.get(document.id) ?? []).sort(
         (left, right) => Number(left.chunk_index) - Number(right.chunk_index),
       );
-
-      for (const chunk of chunks) {
+      for (const chunk of productChunks) {
         results.push({
           ...chunk,
           metadata: {
-            ...(isRecord(chunk.metadata) ? chunk.metadata : {}),
+            ...asRecord(chunk.metadata),
             title: document.title,
             url: document.url,
             slug: document.slug,
             type: 'product',
+            product_code: stringOrNull(productMetadata.product_code),
+            price_without_tax: stringOrNull(productMetadata.price_without_tax),
+            quantity: stringOrNull(productMetadata.quantity),
+            category_name: stringOrNull(productMetadata.category_name),
+            image_url: null,
           },
         });
         if (results.length >= limit) return results;
       }
     }
-
     return results;
   }
 
-  private async searchLatestBlogDocuments(siteId: string, limit: number) {
-    const { data, error } = await supabase
-      .from('documents')
-      .select('id,title,slug,url,excerpt,content_clean,type,metadata,last_synced_at')
-      .eq('site_id', siteId)
-      .eq('status', 'publish')
-      .in('type', ['post', 'article'])
-      .limit(Math.max(limit * 10, 30));
-
-    if (error) {
-      throw error;
+  private parseQuery(query: string) {
+    const normalized = normalize(query);
+    const rawTerms = normalized.split(' ').filter((term) => term.length >= 2 && !STOP_WORDS.has(term));
+    const terms = new Set(rawTerms);
+    for (const term of rawTerms) {
+      for (const alias of TERM_ALIASES[term] ?? []) terms.add(alias);
     }
-
-    return (data ?? [])
-      .map((document, index) => {
-        const wpUpdatedAt = this.getMetadataDate(document.metadata, 'wp_updated_at');
-        const dateMs = this.parseDateMaybe(wpUpdatedAt ?? document.last_synced_at);
-
-        return {
-          result: {
-            id: `document-${document.id}`,
-            document_id: document.id,
-            chunk_index: index,
-            content: (document.excerpt || document.content_clean || document.title || '').slice(0, 900),
-            metadata: {
-              title: document.title,
-              url: document.url,
-              slug: document.slug,
-              type: document.type,
-              wp_updated_at: wpUpdatedAt,
-              last_synced_at: document.last_synced_at,
-            },
-          },
-          dateMs,
-          index,
-        };
-      })
-      .sort((left, right) => (right.dateMs || 0) - (left.dateMs || 0) || left.index - right.index)
-      .slice(0, limit)
-      .map((entry) => entry.result);
-  }
-
-  private extractSearchTerms(query: string): string[] {
-    const normalized = query
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, ' ')
-      .replace(/[^\p{L}\p{N}\s]/gu, ' ');
-
-    const stopWords = new Set([
-      'a',
-      'aj',
-      'ako',
-      'ak',
-      'ake',
-      'akej',
-      'aky',
-      'co',
-      'čo',
-      'do',
-      'ho',
-      'i',
-      'ja',
-      'je',
-      'k',
-      'ma',
-      'mate',
-      'mi',
-      'na',
-      'napis',
-      'napíš',
-      'o',
-      'od',
-      'pre',
-      'sa',
-      'si',
-      'som',
-      'su',
-      'sú',
-      'to',
-      'tu',
-      'v',
-      'vo',
-      'what',
-      'about',
-      'tell',
-      'me',
-      'the',
-      'this',
-      'you',
-      'vi',
-      'volake',
-      'volaky',
-      'vase',
-      'vaše',
-      'vas',
-      'váš',
-      'vlastne',
-      'vlastné',
-      'nejaky',
-      'nejaké',
-      'nejaky',
-    ]);
-
-    return Array.from(
-      new Set(
-        normalized
-          .split(/\s+/)
-          .map((term) => term.trim())
-          .filter((term) => term.length >= 2 && !stopWords.has(term)),
-      ),
-    ).slice(0, 6);
-  }
-
-  private extractColourbondProductTerms(query: string): string[] {
-    const stopWords = new Set([
-      'a', 'aby', 'ano', 'bych', 'co', 'doporucit', 'doporucte', 'do', 'jak', 'jake', 'jaka', 'jaky',
-      'je', 'jsou', 'k', 'mi', 'na', 'nebo', 'o', 'potrebuji', 'potrebuju', 'pro', 's', 'se', 'si',
-      'to', 'v', 've', 'vhodne', 'z',
-    ]);
-
-    return Array.from(
-      new Set(
-        this.normalizeSearchText(query)
-          .split(' ')
-          .filter((term) => term.length >= 3 && !stopWords.has(term)),
-      ),
-    ).slice(0, 6);
-  }
-
-  private scoreColourbondProductDocument(
-    document: { title: string; slug: string; excerpt: string; content_clean: string; metadata?: unknown },
-    searchTerms: string[],
-  ): number {
-    const title = this.normalizeSearchText(document.title);
-    const searchable = this.normalizeSearchText(
-      `${document.title} ${document.slug} ${document.excerpt} ${document.content_clean} ${this.getProductCategory(document.metadata)}`,
-    );
-    const query = searchTerms.join(' ');
-    const asksForAdhesiveOrStone = /\b(lepidl\w*|lepeni|kamen\w*|jolly hran\w*|viditelne spoj\w*)\b/u.test(query);
-    const asksForAccessories = /\b(prislusenstv\w*|kartus\w*|pistol\w*|trysk\w*|aplikac\w*)\b/u.test(query);
-    let score = searchTerms.reduce((total, term) => {
-      if (!searchable.includes(term)) return total;
-      return total + (title.includes(term) ? 12 : 4);
-    }, 0);
-
-    if (asksForAdhesiveOrStone) {
-      if (searchable.includes('lepidla a tmely')) score += 30;
-      score += this.countExactPhraseMatches(searchable, 'lepidlo') * 12;
-      score += this.countExactPhraseMatches(searchable, 'lepeni') * 10;
-      score += this.countExactPhraseMatches(searchable, 'prirodni kamen') * 10;
-      score += this.countExactPhraseMatches(searchable, 'umely kamen') * 10;
-      score += this.countExactPhraseMatches(searchable, 'jolly hran') * 12;
-      score += this.countExactPhraseMatches(searchable, 'viditelne spoje') * 12;
-      score += this.preferredColourbondAdhesiveTitleBoost(title);
-
-      if (!asksForAccessories && /\b(pistol\w*|trysk\w*|koncovka|kartus\w*|aplikac\w*)\b/u.test(title)) {
-        score -= 80;
-      }
-    }
-
-    return score;
-  }
-
-  private getProductCategory(metadata: unknown): string {
-    if (!isRecord(metadata)) return '';
-    const category = metadata.category_name;
-    return typeof category === 'string' ? category : '';
-  }
-
-  private preferredColourbondAdhesiveTitleBoost(title: string): number {
-    const boosts: Record<string, number> = {
-      'colour bond p 6min': 180,
-      'akepox 5010': 170,
-      'akepox 2040': 160,
-      'platinum maxi power tekute': 150,
-      'platinum maxi power': 145,
-      'akenova rocket 200': 120,
-      'akenova elastic 100': 115,
+    const phrase = (value: string) => normalized.includes(value);
+    return {
+      terms: [...terms],
+      adhesive: /\b(lepidl\w*|lepeni|lepenie|tmel\w*|tmeleni|tmelenie|jolly)\b/u.test(normalized),
+      cleaning: /\b(cistic\w*|cisteni|cistenie|cistit|odmasteni|acryclean|acid)\b/u.test(normalized),
+      accessory: /\b(trysk\w*|pistol\w*|kartus\w*|aplikac\w*|prislusenstv\w*)\b/u.test(normalized),
+      kitchen: /\b(kuchyn\w*)\b/u.test(normalized),
+      worktop: phrase('pracovni deska') || phrase('pracovna doska'),
+      externalBrand: EXTERNAL_BRANDS.some((brand) => normalized.includes(brand)),
+      directProduct: normalized,
     };
-
-    return boosts[title] ?? 0;
   }
 
-  private countExactPhraseMatches(value: string, phrase: string): number {
-    let count = 0;
-    let offset = 0;
-    while (true) {
-      const foundAt = value.indexOf(phrase, offset);
-      if (foundAt === -1) return Math.min(count, 3);
-      count += 1;
-      offset = foundAt + phrase.length;
-    }
-  }
-
-  private expandSearchTerms(terms: string[], intent: SearchIntent): string[] {
-    const synonymMap: Record<string, string[]> = {
-      kontakt: ['contact', 'kontakt', 'formular', 'form', 'email', 'mail'],
-      contact: ['contact', 'kontakt', 'formular', 'form', 'email', 'mail'],
-      formular: ['formular', 'form', 'contact'],
-      form: ['form', 'formular', 'contact'],
-      clanok: ['clanok', 'článok', 'article', 'post'],
-      article: ['article', 'post', 'clanok'],
-      odporucate: ['odporucate', 'recommended', 'best', 'top'],
-      odporucit: ['odporucit', 'recommended', 'best', 'top'],
-      best: ['best', 'top', 'recommended'],
-      tools: ['tools', 'tool'],
-      tool: ['tool', 'tools'],
-      ai: ['ai'],
-      nastroj: ['nastroj', 'nastroje', 'sluzby', 'app', 'aplikacia'],
-      nastroje: ['nastroje', 'nastroj', 'sluzby', 'app', 'aplikacia'],
-      app: ['app', 'aplikacia', 'aplikacie', 'sluzby'],
-      aplikacia: ['aplikacia', 'aplikacie', 'app', 'sluzby'],
-      aplikacie: ['aplikacie', 'aplikacia', 'app', 'sluzby'],
-      sluzba: ['sluzba', 'sluzby', 'riesenie', 'app'],
-      sluzby: ['sluzby', 'sluzba', 'riesenie', 'app'],
-      preklad: ['preklad', 'preklad textu', 'textu', 'prekladatel'],
-      textu: ['textu', 'preklad', 'obsah'],
-      prepis: ['prepis', 'prepisovanie', 'transkript', 'audio', 'video'],
-      prepisovanie: ['prepisovanie', 'prepis', 'transkript', 'audio', 'video'],
-      obsah: ['obsah', 'generator', 'generator obsahu', 'copy', 'texty'],
-      generator: ['generator', 'generator obsahu', 'obsah', 'texty'],
-      analytika: ['analytika', 'analyza', 'data', 'reporting'],
-      analyza: ['analyza', 'analytika', 'data', 'reporting'],
-      data: ['data', 'analytika', 'analyza', 'reporting'],
-      web: ['web', 'web asistent', 'asistent'],
-      asistent: ['asistent', 'web asistent', 'chat', 'chatbot'],
-    };
-
-    const expanded = new Set<string>();
-
-    for (const term of terms) {
-      expanded.add(term);
-
-      for (const synonym of synonymMap[term] ?? []) {
-        expanded.add(synonym);
-      }
-    }
-
-    if (intent.offerings) {
-      ['sluzby', 'app', 'aplikacia', 'aplikacie', 'preklad', 'prepis', 'obsah', 'analytika', 'asistent'].forEach(
-        (term) => expanded.add(term),
-      );
-    }
-
-    if (intent.blog) {
-      ['blog', 'clanok', 'clanky', 'article', 'post'].forEach((term) => expanded.add(term));
-    }
-
-    if (intent.translation) {
-      ['preklad', 'preklad textu', 'textu'].forEach((term) => expanded.add(term));
-    }
-
-    if (intent.transcription) {
-      ['prepis', 'prepisovanie', 'audio', 'video'].forEach((term) => expanded.add(term));
-    }
-
-    if (intent.contentGeneration) {
-      ['obsah', 'generator', 'generator obsahu', 'texty'].forEach((term) => expanded.add(term));
-    }
-
-    if (intent.analytics) {
-      ['analytika', 'analyza', 'data', 'reporting'].forEach((term) => expanded.add(term));
-    }
-
-    if (intent.webAssistant) {
-      ['web', 'asistent', 'web asistent', 'chatbot'].forEach((term) => expanded.add(term));
-    }
-
-    return Array.from(expanded).slice(0, 12);
-  }
-
-  private rankChunkResults<T extends { content: string; metadata?: { title?: string; slug?: string; url?: string; type?: string } }>(
-    results: T[],
-    terms: string[],
-    intent: SearchIntent,
-    limit: number,
-  ): T[] {
-    return results
-      .map((result) => ({
-        result,
-        score: this.scoreChunkResult(result, terms, intent),
-      }))
-      .filter((entry) => entry.score > 0)
-      .sort((left, right) => right.score - left.score)
-      .slice(0, limit)
-      .map((entry) => entry.result);
-  }
-
-  private scoreChunkResult(
-    result: { content: string; metadata?: { title?: string; slug?: string; url?: string; type?: string } },
-    terms: string[],
-    intent: SearchIntent,
-  ): number {
-    const title = this.normalizeSearchText(result.metadata?.title || '');
-    const slug = this.normalizeSearchText(result.metadata?.slug || '');
-    const type = this.normalizeSearchText(result.metadata?.type || '');
-    const content = this.normalizeSearchText(result.content || '');
-    const url = this.normalizeSearchText(result.metadata?.url || '');
-    const genericTerms = new Set(['ai', 'tool', 'tools', 'best', 'top', 'recommended']);
-
+  private scoreProduct(document: ProductDocument, query: ReturnType<DocumentRepository['parseQuery']>): number {
+    const metadata = asRecord(document.metadata);
+    const title = normalize(document.title);
+    const category = normalize(stringOrNull(metadata.category_name) || '');
+    const content = normalize(`${document.title} ${document.slug} ${document.excerpt} ${document.content_clean} ${category}`);
     let score = 0;
 
-    for (const term of terms) {
-      const normalizedTerm = this.normalizeSearchText(term);
-      if (!normalizedTerm) {
-        continue;
-      }
-
-      const baseWeight = genericTerms.has(normalizedTerm) ? 1 : 4;
-
-      if (title === normalizedTerm) {
-        score += 30 * baseWeight;
-      } else if (title.includes(normalizedTerm)) {
-        score += 12 * baseWeight;
-      }
-
-      if (slug === normalizedTerm) {
-        score += 24 * baseWeight;
-      } else if (slug.includes(normalizedTerm)) {
-        score += 10 * baseWeight;
-      }
-
-      if (type === normalizedTerm) {
-        score += 8 * baseWeight;
-      }
-
-      if (content.includes(normalizedTerm)) {
-        score += 3 * baseWeight;
-      }
-
-      if (url.includes(normalizedTerm)) {
-        score += 6 * baseWeight;
-      }
+    for (const term of query.terms) {
+      if (!content.includes(term)) continue;
+      score += title.includes(term) ? 28 : 6;
     }
 
-    if (intent.offerings && type === 'page') {
-      score += 24;
+    if (query.adhesive) {
+      if (category.includes('lepidla a tmely')) score += 60;
+      score += phraseScore(content, 'lepidlo', 18);
+      score += phraseScore(content, 'lepeni', 15);
+      score += phraseScore(content, 'prirodni kamen', 16);
+      score += phraseScore(content, 'umely kamen', 16);
+      score += phraseScore(content, 'jolly hran', 20);
+      score += phraseScore(content, 'viditelne spoje', 20);
     }
 
-    if (intent.offerings && type === 'post') {
-      score -= 26;
+    if (query.cleaning) {
+      if (category.includes('cisteni')) score += 60;
+      score += phraseScore(content, 'cistic', 18);
+      score += phraseScore(content, 'cisteni', 15);
+      score += phraseScore(content, 'odmasteni', 15);
     }
 
-    if (intent.blog && type === 'post') {
-      score += 34;
+    if (query.worktop) {
+      score += phraseScore(content, 'pracovni des', 20);
+      score += phraseScore(content, 'desek', 10);
     }
 
-    if (intent.blog && type === 'article') {
-      score += 34;
-    }
-
-    if (intent.blog && type === 'page') {
-      score -= 18;
-    }
-
-    if (this.matchesAnyKeyword([slug, title, url], ['sluzby', 'analytika', 'prepis reci', 'prepis-reci', 'generator obsahu', 'generator-obsahu', 'preklad textu', 'preklad-textu', 'web asistent', 'web-asistent'])) {
-      score += 70;
-    }
-
-    if (intent.offerings && this.matchesAnyKeyword([slug, title, url], ['sluzby', 'preklad', 'prepis', 'obsah', 'analytika', 'asistent'])) {
-      score += 38;
-    }
-
-    if (
-      intent.offerings &&
-      this.matchesAnyKeyword([content], [
-        'preklad textu',
-        'prepis audio',
-        'prepis video',
-        'generator obsahu',
-        'analyza dat',
-        'analytika dat',
-        'web asistent',
-        'ai na mieru',
-        'odporucanie + nastavenie',
-      ])
-    ) {
-      score += 30;
-    }
-
-    if (intent.translation && this.matchesAnyKeyword([slug, title, url], ['preklad', 'textu'])) {
-      score += 42;
-    }
-
-    if (intent.transcription && this.matchesAnyKeyword([slug, title, url], ['prepis', 'prepisovanie', 'audio', 'video'])) {
-      score += 42;
-    }
-
-    if (intent.contentGeneration && this.matchesAnyKeyword([slug, title, url], ['generator', 'obsah', 'texty'])) {
-      score += 42;
-    }
-
-    if (intent.analytics && this.matchesAnyKeyword([slug, title, url], ['analytika', 'analyza', 'data', 'reporting'])) {
-      score += 42;
-    }
-
-    if (intent.webAssistant && this.matchesAnyKeyword([slug, title, url], ['web asistent', 'asistent', 'chatbot'])) {
-      score += 42;
-    }
-
-    if (intent.offerings && this.matchesAnyKeyword([title, slug, url], ['chatgpt', 'midjourney', 'deepl', 'google translate'])) {
-      score -= 36;
-    }
-
-    if (intent.offerings && this.matchesAnyKeyword([title, slug, url], ['top', 'najnovsie', 'najnovsi', 'blog', 'navody', 'sprievodca', 'review'])) {
-      score -= 24;
-    }
-
-    if (this.isLegalPage(title, slug, url) && !intent.contactLike) {
-      score -= 60;
-    }
+    if (title === query.directProduct || query.directProduct.includes(title)) score += 220;
+    if (query.adhesive) score += preferredAdhesiveTitleBoost(title);
+    if (!query.accessory && /\b(pistol\w*|trysk\w*|koncovka|kartus\w*|aplikac\w*)\b/u.test(title)) score -= 120;
 
     return score;
-  }
-
-  private matchesAnyKeyword(values: string[], keywords: string[]): boolean {
-    return keywords.some((keyword) => {
-      const normalizedKeyword = this.normalizeSearchText(keyword);
-      return values.some((value) => value.includes(normalizedKeyword));
-    });
-  }
-
-  private detectSearchIntent(query: string): SearchIntent {
-    const normalized = this.normalizeSearchText(query);
-
-    const includesAny = (terms: string[]) => terms.some((term) => normalized.includes(this.normalizeSearchText(term)));
-    const blog = includesAny(['blog', 'clanok', 'článok', 'clanky', 'články', 'article', 'post', 'kybernetick', 'bezpecnost', 'bezpečnost', 'cyber', 'security']);
-    const latestBlog = blog && includesAny(['najnovsi', 'najnovší', 'najnovsie', 'najnovšie', 'novy', 'nový', 'nova', 'nová', 'nove', 'nové', 'posledny', 'posledný', 'posledna', 'posledná', 'posledne', 'posledné', 'latest']);
-
-    return {
-      offerings: !blog && includesAny(['vase', 'vaše', 'vas', 'ponukate', 'ponúkate', 'mate', 'máte', 'sluzby', 'služby', 'app', 'aplikacia', 'aplikácie', 'nastroj', 'nástroj', 'nastroje', 'nástroje']),
-      translation: !blog && includesAny(['preklad', 'preklad textu', 'translate', 'translator']),
-      transcription: !blog && includesAny(['prepis', 'prepisovanie', 'transkript', 'audio', 'video']),
-      contentGeneration: !blog && includesAny(['generator obsahu', 'obsah', 'copy', 'texty', 'clanky', 'články', 'emaily']),
-      analytics: !blog && includesAny(['analytika', 'analyza', 'analýza', 'data', 'reporting']),
-      webAssistant: !blog && includesAny(['web asistent', 'asistent', 'chatbot']),
-      contactLike: includesAny(['kontakt', 'contact', 'email', 'formular', 'form']),
-      latestBlog,
-      blog,
-    };
-  }
-
-  private isLegalPage(title: string, slug: string, url: string): boolean {
-    return this.matchesAnyKeyword([title, slug, url], [
-      'privacy',
-      'ochrana udajov',
-      'ochrany osobnych udajov',
-      'zasady ochrany',
-      'gdpr',
-      'cookie',
-      'cookies',
-      'suborov cookie',
-      'terms',
-      'podmienky',
-      'zasady pouzivania',
-    ]);
-  }
-
-  private normalizeSearchText(value: string): string {
-    return value
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
-
-  private getMetadataDate(metadata: unknown, key: string): string | null {
-    if (!metadata || typeof metadata !== 'object' || !(key in metadata)) {
-      return null;
-    }
-
-    const value = (metadata as Record<string, unknown>)[key];
-    return typeof value === 'string' && value.trim() ? value : null;
-  }
-
-  private parseDateMaybe(value: unknown): number | null {
-    if (!value) return null;
-    if (typeof value === 'number' && Number.isFinite(value)) return value > 10_000_000_000 ? value : value * 1000;
-    if (typeof value !== 'string') return null;
-
-    const ms = Date.parse(value);
-    return Number.isFinite(ms) ? ms : null;
   }
 }
 
-type SearchIntent = {
-  offerings: boolean;
-  translation: boolean;
-  transcription: boolean;
-  contentGeneration: boolean;
-  analytics: boolean;
-  webAssistant: boolean;
-  contactLike: boolean;
-  latestBlog: boolean;
-  blog: boolean;
-};
+function preferredAdhesiveTitleBoost(title: string): number {
+  const boosts: Record<string, number> = {
+    'colour bond p 6min': 180,
+    'akepox 5010': 170,
+    'akepox 2040': 160,
+    'platinum maxi power tekute': 150,
+    'platinum maxi power': 145,
+    'akenova rocket 200': 120,
+    'akenova elastic 100': 115,
+  };
+  return boosts[title] ?? 0;
+}
+
+function phraseScore(value: string, phrase: string, weight: number): number {
+  let count = 0;
+  let offset = 0;
+  while (count < 3) {
+    const index = value.indexOf(phrase, offset);
+    if (index === -1) break;
+    count += 1;
+    offset = index + phrase.length;
+  }
+  return count * weight;
+}
+
+function normalize(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function stringOrNull(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null;
+}

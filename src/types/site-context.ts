@@ -9,17 +9,6 @@ export type LeadQuestion = {
   options?: string[];
 };
 
-export type SiteAiConfig = {
-  /** A server-side system-prompt template. Supports {{assistantName}}, {{languageName}}, and {{tone}}. */
-  system_prompt_template?: string;
-  /** Applied only when the resolved site language is Slovak. */
-  slovak_language_instructions?: string;
-  /** Additional server-side instructions appended to the system prompt. */
-  additional_instructions?: string;
-  /** Keeps the historical Nastroje-specific canned-answer routing enabled when true. */
-  enable_legacy_local_responses?: boolean;
-};
-
 export type SiteSettingsRecord = {
   assistant_name: string;
   welcome_message: string;
@@ -35,9 +24,7 @@ export type SiteSettingsRecord = {
     cta_label?: string;
     questions?: LeadQuestion[];
   };
-  sync_config: Record<string, unknown> & {
-    ai_config?: SiteAiConfig;
-  };
+  sync_config: Record<string, unknown>;
   language?: string;
 };
 

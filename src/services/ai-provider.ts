@@ -1,12 +1,16 @@
 import type { RetrievedChunk } from './retrieval-service.js';
-import type { SiteAiConfig } from '../types/site-context.js';
+
+export type ProductCard = {
+  title: string;
+  url: string;
+  image_url: string | null;
+  price_without_tax: string | null;
+  quantity: string | null;
+  category: string | null;
+  reason: string;
+};
 
 export type GenerateReplyInput = {
-  assistantName: string;
-  language: string;
-  tone: string;
-  aiConfig: Required<SiteAiConfig>;
-  strictSiteGrounding: boolean;
   question: string;
   retrievedChunks: RetrievedChunk[];
   conversationHistory: Array<{
@@ -18,6 +22,7 @@ export type GenerateReplyInput = {
 export type GenerateReplyResult = {
   text: string;
   sources: Array<{ title: string; url: string }>;
+  products?: ProductCard[];
   provider: string;
 };
 

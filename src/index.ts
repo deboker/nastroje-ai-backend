@@ -15,7 +15,6 @@ import { createSyncRoutes } from './routes/sync.js';
 import { ChatService } from './services/chat-service.js';
 import { GroqProvider } from './services/groq-provider.js';
 import { LeadService } from './services/lead-service.js';
-import { MockAIProvider } from './services/mock-ai-provider.js';
 import { RetrievalService } from './services/retrieval-service.js';
 import { SiteService } from './services/site-service.js';
 import { SyncService } from './services/sync-service.js';
@@ -34,7 +33,7 @@ const siteService = new SiteService(siteRepository, leadRepository);
 const syncService = new SyncService(documentRepository, opsRepository);
 const retrievalService = new RetrievalService(documentRepository);
 const leadService = new LeadService(leadRepository, conversationRepository, opsRepository);
-const aiProvider = env.GROQ_API_KEY ? new GroqProvider() : new MockAIProvider();
+const aiProvider = new GroqProvider();
 const chatService = new ChatService(
   conversationRepository,
   retrievalService,
@@ -88,5 +87,5 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 });
 
 app.listen(env.PORT, () => {
-  console.log(`Nastroje AI backend listening on http://localhost:${env.PORT}`);
+  console.log(`Colourbond.cz backend listening on http://localhost:${env.PORT}`);
 });

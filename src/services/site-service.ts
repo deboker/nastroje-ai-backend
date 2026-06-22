@@ -50,25 +50,23 @@ export class SiteService {
     }
 
     const settings = await this.siteRepository.upsertSiteSettings(site.id, {
-      assistant_name: input.site_settings?.assistant_name ?? 'Nastroje AI Assistant',
+      assistant_name: input.site_settings?.assistant_name ?? 'Produktový poradce Colourbond.cz',
       welcome_message:
-        input.site_settings?.welcome_message ?? 'Dobrý deň, som váš AI asistent. Ako vám môžem pomôcť?',
+        input.site_settings?.welcome_message ?? 'Dobrý den, pomohu vám s výběrem produktů Colourbond.cz.',
       tone: input.site_settings?.tone ?? 'professional',
       theme: input.site_settings?.theme ?? 'teal',
       widget_enabled: input.site_settings?.widget_enabled ?? true,
       shortcode_enabled: input.site_settings?.shortcode_enabled ?? true,
       lead_capture_enabled: input.site_settings?.lead_capture_enabled ?? true,
       lead_flow_config: input.site_settings?.lead_flow_config ?? {
-        form_name: 'Predajný brief',
-        intro_message: 'Pred tým, než pripravíme návrh, položím vám niekoľko stručných otázok.',
-        success_message: 'Ďakujeme, brief sme prijali a ozveme sa vám.',
-        cta_label: 'Spustiť brief',
+        form_name: 'Produktový dotaz',
+        intro_message: 'Položte prosím dotaz k produktu Colourbond.cz.',
+        success_message: 'Děkujeme za dotaz. Prodejce vás bude kontaktovat.',
+        cta_label: 'Odeslat dotaz',
         questions: [
-          { id: 'name', label: 'Ako sa voláte?', type: 'text', required: true },
-          { id: 'email', label: 'Aký je váš e-mail?', type: 'email', required: true },
-          { id: 'company', label: 'Aká je vaša firma?', type: 'text', required: false },
-          { id: 'goal', label: 'Čo potrebujete vyriešiť?', type: 'textarea', required: true },
-          { id: 'timeline', label: 'Aký máte termín?', type: 'text', required: false },
+          { id: 'name', label: 'Jak se jmenujete?', type: 'text', required: true },
+          { id: 'email', label: 'Jaký je váš e-mail?', type: 'email', required: true },
+          { id: 'goal', label: 'S čím potřebujete poradit?', type: 'textarea', required: true },
         ],
       },
       sync_config: input.site_settings?.sync_config ?? {},

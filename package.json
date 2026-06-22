@@ -1,11 +1,12 @@
 {
-  "name": "nastroje-ai-backend",
+  "name": "colourbond-product-assistant-backend",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/index.js",
     "onboard:colourbond": "tsx scripts/onboard-colourbond-site.ts",
     "rotate:colourbond-token": "tsx scripts/rotate-colourbond-site-token.ts",
