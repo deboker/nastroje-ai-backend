@@ -19,6 +19,7 @@ type ChatInput = {
 };
 
 const MAX_CONVERSATION_MESSAGES = 60;
+const COLOURBOND_PUBLIC_SITE_KEY = 'colourbond-cz';
 
 export class ChatService {
   constructor(
@@ -54,7 +55,27 @@ export class ChatService {
     });
 
     const recentMessages = await this.conversationRepository.listRecentMessages(conversation.id, 8);
-    const retrievedChunks = await this.retrievalService.searchRelevantContent(siteContext.site.id, input.message, 5);
+    const isColourbond = siteContext.site.public_site_key === COLOURBOND_PUBLIC_SITE_KEY;
+    let retrievedChunks = await this.retrievalService.searchRelevantContent(siteContext.site.id, input.message, 5);
+    if (isColourbond && isColourbondProductRecommendationQuestion(input.message)) {
+      const productChunks = await this.retrievalService.searchColourbondProductFallback(siteContext.site.id, input.message, 5);
+      if (productChunks.length > 0) {
+        retrievedChunks = productChunks;
+      }
+    } else if (isColourbond && retrievedChunks.length === 0) {
+      retrievedChunks = await this.retrievalService.searchColourbondProductFallback(siteContext.site.id, input.message, 5);
+    }
+    if (isColourbond) {
+      console.info({
+        type: 'colourbond_retrieval',
+        sitePublicKey: siteContext.site.public_site_key,
+        siteId: siteContext.site.id,
+        retrievedChunkCount: retrievedChunks.length,
+        retrievedDocumentTitles: Array.from(
+          new Set(retrievedChunks.map((chunk) => chunk.metadata?.title).filter((title): title is string => Boolean(title))),
+        ),
+      });
+    }
     const assistantName = input.assistant_name || siteContext.settings?.assistant_name || 'Nastroje AI Assistant';
     const language = input.language || siteContext.site.language || 'sk';
     const tone = input.tone || siteContext.settings?.tone || 'professional';
@@ -64,6 +85,7 @@ export class ChatService {
       language,
       tone,
       aiConfig,
+      strictProductGrounding: isColourbond,
       question: input.message,
       retrievedChunks,
       conversationHistory: recentMessages.map((message) => ({
@@ -154,4 +176,17 @@ export class ChatService {
       mode: 'chat',
     });
   }
+}
+
+function isColourbondProductRecommendationQuestion(message: string): boolean {
+  const normalized = message
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const productTerms = /\b(lepidl\w*|tmel\w*|impregna\w*|cistic\w*|cisteni|pigment\w*|akepox|platinum|produkt\w*)\b/u;
+  const recommendationTerms = /\b(potrebuji|potrebuju|doporuc\w*|jak\w*|vhodn\w*|vybrat|pouzit|na kamen)\b/u;
+  return productTerms.test(normalized) && recommendationTerms.test(normalized);
 }

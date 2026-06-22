@@ -1,5 +1,9 @@
 import { supabase } from '../lib/supabase.js';
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
 export type SyncDocumentInput = {
   wp_object_id: number;
   type: string;
@@ -149,6 +153,74 @@ export class DocumentRepository {
     return this.rankChunkResults(mappedFallbackResults, searchTerms, searchIntent, limit);
   }
 
+  /**
+   * Colourbond-only keyword fallback. It searches only this site's product documents,
+   * then returns their persisted chunks rather than manufacturing context from another site.
+   */
+  async searchColourbondProductChunks(siteId: string, query: string, limit = 5) {
+    const searchTerms = this.extractColourbondProductTerms(query);
+    if (!searchTerms.length) return [];
+
+    const { data: productDocuments, error: documentsError } = await supabase
+      .from('documents')
+      .select('id,title,slug,url,excerpt,content_clean')
+      .eq('site_id', siteId)
+      .eq('type', 'product')
+      .eq('status', 'publish');
+
+    if (documentsError) throw documentsError;
+
+    const rankedDocuments = (productDocuments ?? [])
+      .map((document) => ({
+        document,
+        score: this.scoreColourbondProductDocument(document, searchTerms),
+      }))
+      .filter((entry) => entry.score > 0)
+      .sort((left, right) => right.score - left.score || left.document.title.localeCompare(right.document.title))
+      .slice(0, limit);
+
+    if (!rankedDocuments.length) return [];
+
+    const documentIds = rankedDocuments.map((entry) => entry.document.id);
+    const { data: storedChunks, error: chunksError } = await supabase
+      .from('document_chunks')
+      .select('id,document_id,chunk_index,content,metadata')
+      .eq('site_id', siteId)
+      .in('document_id', documentIds);
+
+    if (chunksError) throw chunksError;
+
+    const chunksByDocumentId = new Map<string, Array<Record<string, unknown>>>();
+    for (const chunk of storedChunks ?? []) {
+      const existing = chunksByDocumentId.get(chunk.document_id) ?? [];
+      existing.push(chunk as Record<string, unknown>);
+      chunksByDocumentId.set(chunk.document_id, existing);
+    }
+
+    const results: Array<Record<string, unknown>> = [];
+    for (const { document } of rankedDocuments) {
+      const chunks = (chunksByDocumentId.get(document.id) ?? []).sort(
+        (left, right) => Number(left.chunk_index) - Number(right.chunk_index),
+      );
+
+      for (const chunk of chunks) {
+        results.push({
+          ...chunk,
+          metadata: {
+            ...(isRecord(chunk.metadata) ? chunk.metadata : {}),
+            title: document.title,
+            url: document.url,
+            slug: document.slug,
+            type: 'product',
+          },
+        });
+        if (results.length >= limit) return results;
+      }
+    }
+
+    return results;
+  }
+
   private async searchLatestBlogDocuments(siteId: string, limit: number) {
     const { data, error } = await supabase
       .from('documents')
@@ -261,6 +333,37 @@ export class DocumentRepository {
           .filter((term) => term.length >= 2 && !stopWords.has(term)),
       ),
     ).slice(0, 6);
+  }
+
+  private extractColourbondProductTerms(query: string): string[] {
+    const stopWords = new Set([
+      'a', 'aby', 'ano', 'bych', 'co', 'doporucit', 'doporucte', 'do', 'jak', 'jake', 'jaka', 'jaky',
+      'je', 'jsou', 'k', 'mi', 'na', 'nebo', 'o', 'potrebuji', 'potrebuju', 'pro', 's', 'se', 'si',
+      'to', 'v', 've', 'vhodne', 'z',
+    ]);
+
+    return Array.from(
+      new Set(
+        this.normalizeSearchText(query)
+          .split(' ')
+          .filter((term) => term.length >= 3 && !stopWords.has(term)),
+      ),
+    ).slice(0, 6);
+  }
+
+  private scoreColourbondProductDocument(
+    document: { title: string; slug: string; excerpt: string; content_clean: string },
+    searchTerms: string[],
+  ): number {
+    const title = this.normalizeSearchText(document.title);
+    const searchable = this.normalizeSearchText(
+      `${document.title} ${document.slug} ${document.excerpt} ${document.content_clean}`,
+    );
+
+    return searchTerms.reduce((score, term) => {
+      if (!searchable.includes(term)) return score;
+      return score + (title.includes(term) ? 12 : 4);
+    }, 0);
   }
 
   private expandSearchTerms(terms: string[], intent: SearchIntent): string[] {

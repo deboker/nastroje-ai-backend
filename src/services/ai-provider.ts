@@ -6,6 +6,7 @@ export type GenerateReplyInput = {
   language: string;
   tone: string;
   aiConfig: Required<SiteAiConfig>;
+  strictProductGrounding: boolean;
   question: string;
   retrievedChunks: RetrievedChunk[];
   conversationHistory: Array<{

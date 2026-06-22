@@ -24,4 +24,9 @@ export class RetrievalService {
     const chunks = await this.documentRepository.searchChunks(siteId, query, limit);
     return chunks as RetrievedChunk[];
   }
+
+  async searchColourbondProductFallback(siteId: string, query: string, limit = 5): Promise<RetrievedChunk[]> {
+    const chunks = await this.documentRepository.searchColourbondProductChunks(siteId, query, limit);
+    return chunks as RetrievedChunk[];
+  }
 }

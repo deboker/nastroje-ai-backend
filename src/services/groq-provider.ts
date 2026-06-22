@@ -94,9 +94,13 @@ const OFFERING_CATALOG: Array<{
 
 export class GroqProvider implements AIProvider {
   async generateReply(input: GenerateReplyInput): Promise<GenerateReplyResult> {
+    const sources = this.collectSources(input);
+    if (input.strictProductGrounding && this.isProductRecommendationQuestion(input.question)) {
+      return this.buildGroundedProductRecommendation(input, sources);
+    }
+
     if (!env.GROQ_API_KEY) throw new Error('GROQ_API_KEY is missing.');
 
-    const sources = this.collectSources(input);
     const localReply = input.aiConfig.enable_legacy_local_responses
       ? this.buildLocalReply(input, sources)
       : null;
@@ -211,6 +215,26 @@ export class GroqProvider implements AIProvider {
 
     contextSections.push(`Website context: ${chunks.join(' ')}`);
     return contextSections.join(' ');
+  }
+
+  private buildGroundedProductRecommendation(
+    input: GenerateReplyInput,
+    sources: Array<{ title: string; url: string }>,
+  ): GenerateReplyResult {
+    if (!input.retrievedChunks.length || !sources.length) {
+      return {
+        text: 'V dostupných podkladech nemám dost informací k doporučení konkrétního produktu. Doporučuji kontaktovat prodejce.',
+        sources: [],
+        provider: `groq:${env.GROQ_MODEL}:grounded-product-guard`,
+      };
+    }
+
+    const productTitles = Array.from(new Set(sources.map((source) => source.title))).slice(0, 3);
+    return {
+      text: `V dostupných podkladech jsem našel relevantní produkty: ${productTitles.join(', ')}. Pro ověření vhodnosti pro konkrétní použití doporučuji porovnat popis produktu nebo kontaktovat prodejce.`,
+      sources,
+      provider: `groq:${env.GROQ_MODEL}:grounded-product-guard`,
+    };
   }
 
   // ---------------------------
@@ -781,6 +805,13 @@ export class GroqProvider implements AIProvider {
 
   private isWebAssistantQuestion(q: string): boolean {
     return /\b(web asistent|asistent|chatbot)\b/u.test(q);
+  }
+
+  private isProductRecommendationQuestion(questionInput: string): boolean {
+    const question = this.normalizeQuestion(questionInput);
+    const productTerms = /\b(lepidl\w*|tmel\w*|impregna\w*|cistic\w*|cisteni|pigment\w*|akepox|platinum|produkt\w*)\b/u;
+    const recommendationTerms = /\b(potrebuji|potrebuju|doporuc\w*|jak\w*|vhodn\w*|vybrat|pouzit|na kamen)\b/u;
+    return productTerms.test(question) && recommendationTerms.test(question);
   }
 
   // ---------------------------
