@@ -56,7 +56,7 @@ export class ColourbondProductProvider implements AIProvider {
       },
       body: JSON.stringify({
         model: env.GROQ_MODEL,
-        temperature: 0.1,
+        temperature: 0.8,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'system', content: this.buildContext(input) },
