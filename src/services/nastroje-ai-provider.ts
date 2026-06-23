@@ -759,9 +759,9 @@ export class NastrojeAiProvider implements AIProvider {
   private isOwnOfferingsQuestion(q: string): boolean {
     // PRÍSNEJŠIE: musí byť jasné, že sa pýta na "vaše" + "služby/nástroje/produkty"
     const aboutYou =
-      /\b(vas|vase|u vas|na vasom webe|ponukate|ponuka)\b/u.test(q) ||
+      /\b(vas|vase|u vas|na vasom webe|ponukate|ponuka|mate)\b/u.test(q) ||
       (/\b(nastroje ai|nastroje-ai|nastrojeai)\b/u.test(q) && /\b(sluzby|sluzba|ponukate|ponuka|produkty|riesenia)\b/u.test(q));
-    const offeringWord = /\b(sluzby|sluzba|nastroj|nastroje|produkt|produkty|riesenie|riesenia|app|apka|aplikacia|aplikacie)\b/u.test(q);
+    const offeringWord = /\b(sluzby|sluzba|nastroj|nastroje|produkt|produkty|riesenie|riesenia|app|apka|aplikacia|aplikacie|ponukate|ponuka)\b/u.test(q);
     return aboutYou && offeringWord;
   }
 

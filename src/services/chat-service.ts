@@ -52,8 +52,8 @@ export class ChatService {
     });
 
     const recentMessages = await this.conversationRepository.listRecentMessages(conversation.id, 8);
-    const retrievedChunks = await this.retrievalService.searchRelevantContent(siteContext.site.id, input.message, 5);
     const { profile, provider } = this.aiProviderRegistry.forSite(siteContext);
+    const retrievedChunks = await this.retrievalService.searchRelevantContent(siteContext.site.id, input.message, 5, profile);
     const reply = await provider.generateReply({
       assistantName: input.assistant_name || siteContext.settings?.assistant_name || 'AI asistent',
       language: input.language || siteContext.site.language || 'sk',

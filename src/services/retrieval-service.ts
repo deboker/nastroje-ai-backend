@@ -20,12 +20,12 @@ export type RetrievedChunk = {
 export class RetrievalService {
   constructor(private readonly documentRepository: DocumentRepository) {}
 
-  async searchRelevantContent(siteId: string, query: string, limit = 5): Promise<RetrievedChunk[]> {
+  async searchRelevantContent(siteId: string, query: string, limit = 5, assistantProfile?: string): Promise<RetrievedChunk[]> {
     if (!query.trim()) {
       return [];
     }
 
-    const chunks = await this.documentRepository.searchChunks(siteId, query, limit);
+    const chunks = await this.documentRepository.searchChunks(siteId, query, limit, assistantProfile);
     return chunks as RetrievedChunk[];
   }
 

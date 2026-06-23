@@ -32,6 +32,18 @@ type ProductDocument = {
   metadata: unknown;
 };
 
+type WebsiteDocument = {
+  id: string;
+  title: string;
+  slug: string;
+  url: string;
+  excerpt: string;
+  content_clean: string;
+  type: string;
+  metadata: unknown;
+  last_synced_at: string | null;
+};
+
 const STOP_WORDS = new Set([
   'a', 'aby', 'ano', 'bych', 'co', 'do', 'i', 'jak', 'jaka', 'jake', 'jaky', 'je', 'jsou', 'k', 'mi', 'na',
   'nebo', 'o', 'od', 'potrebuji', 'potrebuju', 'pro', 's', 'se', 'si', 'to', 'v', 've', 'z',
@@ -93,11 +105,79 @@ export class DocumentRepository {
     if (error) throw error;
   }
 
-  /** Returns only chunks belonging to the authenticated Colourbond site. */
-  async searchChunks(siteId: string, query: string, limit = 5) {
-    // The phpMyAdmin import has no embeddings. Deterministic keyword ranking is
-    // safer than PostgreSQL FTS here: it never maps an unknown brand to unrelated products.
-    return this.searchProductKeywords(siteId, query, limit);
+  /**
+   * Retrieval is profile-specific: product ranking protects Colourbond from unrelated
+   * recommendations, while websites use their synced pages and articles.
+   */
+  async searchChunks(siteId: string, query: string, limit = 5, assistantProfile?: string) {
+    if (assistantProfile === 'colourbond_products') {
+      return this.searchProductKeywords(siteId, query, limit);
+    }
+    return this.searchWebsiteContent(siteId, query, limit);
+  }
+
+  private async searchWebsiteContent(siteId: string, query: string, limit: number) {
+    const normalizedQuery = normalize(query);
+    const asksLatestBlog = /\b(najnovsi|najnovsie|posledny|posledna|posledne|latest)\b/u.test(normalizedQuery) &&
+      /\b(blog|clanok|clanky|article|post)\b/u.test(normalizedQuery);
+
+    if (asksLatestBlog) {
+      const { data, error } = await supabase
+        .from('documents')
+        .select('id,title,slug,url,excerpt,content_clean,type,metadata,last_synced_at')
+        .eq('site_id', siteId)
+        .eq('status', 'publish')
+        .in('type', ['post', 'article'])
+        .order('last_synced_at', { ascending: false })
+        .limit(limit);
+      if (error) throw error;
+      return this.toWebsiteResults((data ?? []) as WebsiteDocument[]);
+    }
+
+    const { data: fullTextChunks, error: fullTextError } = await supabase
+      .from('document_chunks')
+      .select('id,document_id,chunk_index,content,metadata')
+      .eq('site_id', siteId)
+      .textSearch('search_tsv', query, { type: 'websearch', config: 'simple' })
+      .limit(limit);
+    if (fullTextError) throw fullTextError;
+    if (fullTextChunks?.length) return fullTextChunks;
+
+    const terms = normalizedQuery
+      .split(' ')
+      .filter((term) => term.length >= 3 && !['ako', 'aky', 'co', 'mate', 'nase', 'nasi', 'pre', 'som', 'stranka', 'tu', 'vas'].includes(term));
+    if (!terms.length) return [];
+
+    const filters = terms.flatMap((term) => {
+      const safe = term.replace(/[%_,]/g, '');
+      return [`title.ilike.%${safe}%`, `slug.ilike.%${safe}%`, `excerpt.ilike.%${safe}%`, `content_clean.ilike.%${safe}%`];
+    });
+    const { data, error } = await supabase
+      .from('documents')
+      .select('id,title,slug,url,excerpt,content_clean,type,metadata,last_synced_at')
+      .eq('site_id', siteId)
+      .eq('status', 'publish')
+      .or(filters.join(','))
+      .limit(limit);
+    if (error) throw error;
+    return this.toWebsiteResults((data ?? []) as WebsiteDocument[]);
+  }
+
+  private toWebsiteResults(documents: WebsiteDocument[]) {
+    return documents.map((document, index) => ({
+      id: `document-${document.id}`,
+      document_id: document.id,
+      chunk_index: index,
+      content: (document.excerpt || document.content_clean || document.title || '').slice(0, 900),
+      metadata: {
+        title: document.title,
+        url: document.url,
+        slug: document.slug,
+        type: document.type,
+        ...asRecord(document.metadata),
+        last_synced_at: document.last_synced_at,
+      },
+    }));
   }
 
   private async searchProductKeywords(siteId: string, query: string, limit: number) {
