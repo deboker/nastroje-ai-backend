@@ -27,13 +27,22 @@ export class ColourbondProductProvider implements AIProvider {
     const sources = this.collectSources(input);
     const products = this.collectProducts(input);
 
-    if (this.isGreeting(input.question)) {
+    if (this.isIdentityQuestion(input.question) || this.isCapabilityQuestion(input.question)) {
+      return this.buildCategoryGuideReply('identity');
+    }
+
+    if (this.isLocationQuestion(input.question)) {
       return {
-        text: 'Dobrý den, jsem Produktový poradce Colourbond.cz. Pomohu vám vybrat produkt z dostupného katalogu.',
+        text: 'Jsem online produktový poradce Colourbond.cz. S výběrem produktů poradím zde v chatu; pro kontakt na prodejce použijte kontaktní formulář.',
         sources: [],
         products: [],
-        provider: `groq:${env.GROQ_MODEL}:grounded-greeting`,
+        links: [{ label: 'Kontaktovat prodejce', url: 'https://colourbond.abcdizajn.sk/cs/kontakt' }],
+        provider: `groq:${env.GROQ_MODEL}:grounded-location`,
       };
+    }
+
+    if (this.isGreeting(input.question)) {
+      return this.buildCategoryGuideReply('greeting');
     }
 
     if (this.isContactQuestion(input.question)) {
@@ -172,6 +181,29 @@ export class ColourbondProductProvider implements AIProvider {
 
   private isGreeting(question: string): boolean {
     return /^(ahoj+|cau+|caute|dobry den|dobry vecer|hello+|hi+|hey+)$/u.test(this.normalize(question));
+  }
+
+  private isIdentityQuestion(question: string): boolean {
+    return /\b(kdo jsi|kdo si|kto si|co jsi|co si|jsi ai|si ai|jsi clovek|si clovek)\b/u.test(this.normalize(question));
+  }
+
+  private isCapabilityQuestion(question: string): boolean {
+    return /\b(co umis|co umite|s cim pomuzes|s cim pomozes|jak muzes pomoct|jak muzes pomoci|pomoc)\b/u.test(
+      this.normalize(question),
+    );
+  }
+
+  private isLocationQuestion(question: string): boolean {
+    return /\b(kde se nachazite|kde se nachazis|kde sa nachazate|kde sa nachadzas|kde jste|kde sidlite|adresa|sidlo)\b/u.test(this.normalize(question));
+  }
+
+  private buildCategoryGuideReply(providerSuffix: 'identity' | 'greeting'): GenerateReplyResult {
+    return {
+      text: 'Jsem Produktový poradce Colourbond.cz. Pomohu vám s výběrem produktů z kategorií Lepidla a tmely, Čištění a Příslušenství. Vyberte si kategorii nahoře v chatu nebo napište, co potřebujete lepit, čistit či aplikovat.',
+      sources: [],
+      products: [],
+      provider: `groq:${env.GROQ_MODEL}:grounded-${providerSuffix}`,
+    };
   }
 
   private isContactQuestion(question: string): boolean {
