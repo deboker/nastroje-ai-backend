@@ -32,7 +32,7 @@ export class NastrojeAiProvider implements AIProvider {
       },
       body: JSON.stringify({
         model: env.GROQ_MODEL,
-        temperature: 0.4,
+        temperature: 0.6,
         messages: [
           {
             role: 'system',
