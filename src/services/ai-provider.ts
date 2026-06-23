@@ -11,6 +11,10 @@ export type ProductCard = {
 };
 
 export type GenerateReplyInput = {
+  assistantName: string;
+  language: string;
+  tone: string;
+  assistantProfile: string;
   question: string;
   retrievedChunks: RetrievedChunk[];
   conversationHistory: Array<{

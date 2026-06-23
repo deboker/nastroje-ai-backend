@@ -3,7 +3,7 @@ import { HttpError } from '../lib/http-error.js';
 import { ConversationRepository } from '../repositories/conversation-repository.js';
 import { OpsRepository } from '../repositories/ops-repository.js';
 import type { SiteContext } from '../types/site-context.js';
-import type { AIProvider } from './ai-provider.js';
+import { AIProviderRegistry } from './ai-provider-registry.js';
 import { RetrievalService } from './retrieval-service.js';
 
 type ChatInput = {
@@ -18,14 +18,12 @@ type ChatInput = {
 };
 
 const MAX_CONVERSATION_MESSAGES = 60;
-const COLOURBOND_PUBLIC_SITE_KEY = 'colourbond-cz';
-
 export class ChatService {
   constructor(
     private readonly conversationRepository: ConversationRepository,
     private readonly retrievalService: RetrievalService,
     private readonly opsRepository: OpsRepository,
-    private readonly aiProvider: AIProvider,
+    private readonly aiProviderRegistry: AIProviderRegistry,
   ) {}
 
   async createConversation(siteContext: SiteContext, input: Omit<ChatInput, 'message'>) {
@@ -54,24 +52,13 @@ export class ChatService {
     });
 
     const recentMessages = await this.conversationRepository.listRecentMessages(conversation.id, 8);
-    const isColourbond = siteContext.site.public_site_key === COLOURBOND_PUBLIC_SITE_KEY;
-    if (!isColourbond) {
-      throw new HttpError(403, 'This backend is dedicated to Colourbond.cz.');
-    }
-
     const retrievedChunks = await this.retrievalService.searchRelevantContent(siteContext.site.id, input.message, 5);
-    if (isColourbond) {
-      console.info({
-        type: 'colourbond_retrieval',
-        sitePublicKey: siteContext.site.public_site_key,
-        siteId: siteContext.site.id,
-        retrievedChunkCount: retrievedChunks.length,
-        retrievedDocumentTitles: Array.from(
-          new Set(retrievedChunks.map((chunk) => chunk.metadata?.title).filter((title): title is string => Boolean(title))),
-        ),
-      });
-    }
-    const reply = await this.aiProvider.generateReply({
+    const { profile, provider } = this.aiProviderRegistry.forSite(siteContext);
+    const reply = await provider.generateReply({
+      assistantName: input.assistant_name || siteContext.settings?.assistant_name || 'AI asistent',
+      language: input.language || siteContext.site.language || 'sk',
+      tone: input.tone || siteContext.settings?.tone || 'professional',
+      assistantProfile: profile,
       question: input.message,
       retrievedChunks,
       conversationHistory: recentMessages.map((message) => ({
@@ -83,6 +70,7 @@ export class ChatService {
     await this.conversationRepository.createMessage(conversation.id, 'assistant', reply.text, {
       sources: reply.sources,
       provider: reply.provider,
+      assistant_profile: profile,
       products: reply.products ?? [],
     });
     await this.conversationRepository.touchConversation(conversation.id);

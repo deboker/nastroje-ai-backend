@@ -12,9 +12,12 @@ import { createDashboardRoutes } from './routes/dashboard.js';
 import { createLeadRoutes } from './routes/leads.js';
 import { createSiteRoutes } from './routes/sites.js';
 import { createSyncRoutes } from './routes/sync.js';
+import { AIProviderRegistry, COLOURBOND_PRODUCTS_PROFILE, NASTROJE_WEBSITE_PROFILE } from './services/ai-provider-registry.js';
+import type { AIProvider } from './services/ai-provider.js';
 import { ChatService } from './services/chat-service.js';
-import { GroqProvider } from './services/groq-provider.js';
+import { ColourbondProductProvider } from './services/colourbond-product-provider.js';
 import { LeadService } from './services/lead-service.js';
+import { NastrojeAiProvider } from './services/nastroje-ai-provider.js';
 import { RetrievalService } from './services/retrieval-service.js';
 import { SiteService } from './services/site-service.js';
 import { SyncService } from './services/sync-service.js';
@@ -33,12 +36,17 @@ const siteService = new SiteService(siteRepository, leadRepository);
 const syncService = new SyncService(documentRepository, opsRepository);
 const retrievalService = new RetrievalService(documentRepository);
 const leadService = new LeadService(leadRepository, conversationRepository, opsRepository);
-const aiProvider = new GroqProvider();
+const aiProviderRegistry = new AIProviderRegistry(
+  new Map<string, AIProvider>([
+    [NASTROJE_WEBSITE_PROFILE, new NastrojeAiProvider()],
+    [COLOURBOND_PRODUCTS_PROFILE, new ColourbondProductProvider()],
+  ]),
+);
 const chatService = new ChatService(
   conversationRepository,
   retrievalService,
   opsRepository,
-  aiProvider,
+  aiProviderRegistry,
 );
 
 app.use(
@@ -87,5 +95,5 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 });
 
 app.listen(env.PORT, () => {
-  console.log(`Colourbond.cz backend listening on http://localhost:${env.PORT}`);
+  console.log(`Multi-site AI backend listening on http://localhost:${env.PORT}`);
 });
