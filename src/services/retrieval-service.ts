@@ -10,6 +10,9 @@ export type RetrievedChunk = {
     url?: string;
     slug?: string;
     type?: string;
+    product_id?: string | null;
+    cover_image_id?: string | null;
+    wp_object_id?: number | string;
     image_url?: string | null;
     price_without_tax?: string | null;
     quantity?: string | null;

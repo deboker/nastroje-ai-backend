@@ -1,6 +1,8 @@
 import type { RetrievedChunk } from './retrieval-service.js';
 
 export type ProductCard = {
+  product_id: string | null;
+  cover_image_id: string | null;
   title: string;
   url: string;
   image_url: string | null;

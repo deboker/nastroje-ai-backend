@@ -233,6 +233,8 @@ export class DocumentRepository {
             url: document.url,
             slug: document.slug,
             type: 'product',
+            product_id: stringOrNull(productMetadata.id_product),
+            cover_image_id: stringOrNull(productMetadata.cover_image_id),
             product_code: stringOrNull(productMetadata.product_code),
             price_without_tax: stringOrNull(productMetadata.price_without_tax),
             quantity: stringOrNull(productMetadata.quantity),
@@ -298,6 +300,14 @@ export class DocumentRepository {
     if (query.worktop) {
       score += phraseScore(content, 'pracovni des', 20);
       score += phraseScore(content, 'desek', 10);
+    }
+
+    if (query.accessory) {
+      if (/\b(pistol\w*|trysk\w*|koncovka|kartus\w*|aplikac\w*)\b/u.test(title)) {
+        score += 160;
+      } else {
+        score -= 100;
+      }
     }
 
     if (title === query.directProduct || query.directProduct.includes(title)) score += 220;

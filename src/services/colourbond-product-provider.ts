@@ -56,7 +56,7 @@ export class ColourbondProductProvider implements AIProvider {
       },
       body: JSON.stringify({
         model: env.GROQ_MODEL,
-        temperature: 0.8,
+        temperature: 0.2,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'system', content: this.buildContext(input) },
@@ -124,6 +124,8 @@ export class ColourbondProductProvider implements AIProvider {
       if (!title || seen.has(title)) continue;
       seen.add(title);
       products.push({
+        product_id: this.productIdFromMetadata(chunk.metadata),
+        cover_image_id: typeof chunk.metadata.cover_image_id === 'string' ? chunk.metadata.cover_image_id : null,
         title,
         url: chunk.metadata.url || '',
         image_url: typeof chunk.metadata.image_url === 'string' ? chunk.metadata.image_url : null,
@@ -141,6 +143,14 @@ export class ColourbondProductProvider implements AIProvider {
   private extractReason(content: string): string {
     const match = content.match(/Krátký popis:\s*([^\n]+)/iu);
     return (match?.[1] || content).replace(/\s+/g, ' ').trim().slice(0, 220);
+  }
+
+  private productIdFromMetadata(metadata: GenerateReplyInput['retrievedChunks'][number]['metadata']): string | null {
+    if (typeof metadata.product_id === 'string' && metadata.product_id) return metadata.product_id;
+    if (typeof metadata.wp_object_id === 'string' || typeof metadata.wp_object_id === 'number') {
+      return String(metadata.wp_object_id);
+    }
+    return null;
   }
 
   private mentionsOnlyRetrievedProducts(text: string, products: ProductCard[]): boolean {
