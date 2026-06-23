@@ -36,6 +36,16 @@ export class ColourbondProductProvider implements AIProvider {
       };
     }
 
+    if (this.isContactQuestion(input.question)) {
+      return {
+        text: 'Pro kontaktování prodejce použijte prosím kontaktní formulář.',
+        sources: [],
+        products: [],
+        links: [{ label: 'Kontaktovat prodejce', url: 'https://colourbond.abcdizajn.sk/cs/kontakt' }],
+        provider: `groq:${env.GROQ_MODEL}:grounded-contact`,
+      };
+    }
+
     if (!input.retrievedChunks.length || !sources.length) {
       return {
         text: NO_CONTEXT_REPLY,
@@ -162,6 +172,11 @@ export class ColourbondProductProvider implements AIProvider {
 
   private isGreeting(question: string): boolean {
     return /^(ahoj+|cau+|caute|dobry den|dobry vecer|hello+|hi+|hey+)$/u.test(this.normalize(question));
+  }
+
+  private isContactQuestion(question: string): boolean {
+    const normalized = this.normalize(question);
+    return /\b(kontakt|kontaktovat|kontaktujte|spojit|ozvat|email|telefon)\b/u.test(normalized);
   }
 
   private normalize(value: string): string {

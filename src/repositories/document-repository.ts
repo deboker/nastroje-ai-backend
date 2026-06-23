@@ -224,26 +224,30 @@ export class DocumentRepository {
       const productChunks = (byDocument.get(document.id) ?? []).sort(
         (left, right) => Number(left.chunk_index) - Number(right.chunk_index),
       );
-      for (const chunk of productChunks) {
-        results.push({
-          ...chunk,
-          metadata: {
-            ...asRecord(chunk.metadata),
-            title: document.title,
-            url: document.url,
-            slug: document.slug,
-            type: 'product',
-            product_id: stringOrNull(productMetadata.id_product),
-            cover_image_id: stringOrNull(productMetadata.cover_image_id),
-            product_code: stringOrNull(productMetadata.product_code),
-            price_without_tax: stringOrNull(productMetadata.price_without_tax),
-            quantity: stringOrNull(productMetadata.quantity),
-            category_name: stringOrNull(productMetadata.category_name),
-            image_url: null,
-          },
-        });
-        if (results.length >= limit) return results;
-      }
+      // One representative chunk per product keeps category results diverse.
+      // Without this, long product descriptions can consume the entire result
+      // limit and hide other products in the same category.
+      const chunk = productChunks[0];
+      if (!chunk) continue;
+
+      results.push({
+        ...chunk,
+        metadata: {
+          ...asRecord(chunk.metadata),
+          title: document.title,
+          url: document.url,
+          slug: document.slug,
+          type: 'product',
+          product_id: stringOrNull(productMetadata.id_product),
+          cover_image_id: stringOrNull(productMetadata.cover_image_id),
+          product_code: stringOrNull(productMetadata.product_code),
+          price_without_tax: stringOrNull(productMetadata.price_without_tax),
+          quantity: stringOrNull(productMetadata.quantity),
+          category_name: stringOrNull(productMetadata.category_name),
+          image_url: null,
+        },
+      });
+      if (results.length >= limit) return results;
     }
     return results;
   }

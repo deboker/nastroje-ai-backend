@@ -12,6 +12,11 @@ export type ProductCard = {
   reason: string;
 };
 
+export type AssistantLink = {
+  label: string;
+  url: string;
+};
+
 export type GenerateReplyInput = {
   assistantName: string;
   language: string;
@@ -29,6 +34,7 @@ export type GenerateReplyResult = {
   text: string;
   sources: Array<{ title: string; url: string }>;
   products?: ProductCard[];
+  links?: AssistantLink[];
   provider: string;
 };
 

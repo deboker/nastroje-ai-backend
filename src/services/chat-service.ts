@@ -72,6 +72,7 @@ export class ChatService {
       provider: reply.provider,
       assistant_profile: profile,
       products: reply.products ?? [],
+      links: reply.links ?? [],
     });
     await this.conversationRepository.touchConversation(conversation.id);
     await this.opsRepository.logUsage(siteContext.site.id, 'chat_message', {
@@ -85,6 +86,7 @@ export class ChatService {
       reply: reply.text,
       sources: reply.sources,
       products: reply.products ?? [],
+      links: reply.links ?? [],
       provider: reply.provider,
     };
   }
