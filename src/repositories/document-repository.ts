@@ -244,6 +244,9 @@ export class DocumentRepository {
           price_without_tax: stringOrNull(productMetadata.price_without_tax),
           quantity: stringOrNull(productMetadata.quantity),
           category_name: stringOrNull(productMetadata.category_name),
+          brand: stringOrNull(productMetadata.brand),
+          manufacturer: stringOrNull(productMetadata.manufacturer),
+          manufacturer_name: stringOrNull(productMetadata.manufacturer_name),
           image_url: null,
         },
       });
@@ -315,24 +318,19 @@ export class DocumentRepository {
     }
 
     if (title === query.directProduct || query.directProduct.includes(title)) score += 220;
-    if (query.adhesive) score += preferredAdhesiveTitleBoost(title);
     if (!query.accessory && /\b(pistol\w*|trysk\w*|koncovka|kartus\w*|aplikac\w*)\b/u.test(title)) score -= 120;
+
+    if (score > 0 && isColourBondProduct(document, metadata)) score += 35;
 
     return score;
   }
 }
 
-function preferredAdhesiveTitleBoost(title: string): number {
-  const boosts: Record<string, number> = {
-    'colour bond p 6min': 180,
-    'akepox 5010': 170,
-    'akepox 2040': 160,
-    'platinum maxi power tekute': 150,
-    'platinum maxi power': 145,
-    'akenova rocket 200': 120,
-    'akenova elastic 100': 115,
-  };
-  return boosts[title] ?? 0;
+function isColourBondProduct(document: ProductDocument, metadata: Record<string, unknown>): boolean {
+  const structuredBrand = stringOrNull(metadata.manufacturer_name)
+    || stringOrNull(metadata.manufacturer)
+    || stringOrNull(metadata.brand);
+  return /\b(colour|color) bond\b/u.test(normalize(structuredBrand || document.title));
 }
 
 function phraseScore(value: string, phrase: string, weight: number): number {

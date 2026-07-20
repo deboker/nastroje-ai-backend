@@ -17,6 +17,9 @@ export type RetrievedChunk = {
     price_without_tax?: string | null;
     quantity?: string | null;
     category_name?: string | null;
+    brand?: string | null;
+    manufacturer?: string | null;
+    manufacturer_name?: string | null;
   };
 };
 
