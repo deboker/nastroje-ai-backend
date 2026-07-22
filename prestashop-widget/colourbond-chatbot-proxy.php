@@ -196,6 +196,17 @@ function colourbond_chatbot_enrich_product_images($payload)
             $product['url'] = $shopBaseUrl . '/en/' . $productId . '-' . rawurlencode($localProductRewrite) . '.html';
         }
 
+        if ($localCoverImageId <= 0 && $productId > 0) {
+            try {
+                $cover = Product::getCover($productId);
+                if (is_array($cover) && !empty($cover['id_image'])) {
+                    $localCoverImageId = (int) $cover['id_image'];
+                }
+            } catch (Throwable $error) {
+                $localCoverImageId = 0;
+            }
+        }
+
         if ($localCoverImageId > 0 && $localProductRewrite !== '') {
             $product['image_url'] = $shopBaseUrl . '/' . $localCoverImageId
                 . '-home_default/' . rawurlencode($localProductRewrite) . '.jpg';

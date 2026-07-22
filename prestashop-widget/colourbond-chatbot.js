@@ -138,8 +138,8 @@
     });
     if (container.childNodes.length) { messages.appendChild(container); messages.scrollTop = messages.scrollHeight; }
   }
-  function isSafeHttpUrl(value) { try { var url = new URL(value, window.location.origin); return url.protocol === "https:" || url.protocol === "http:"; } catch (error) { return false; } }
-  function isSafeLinkUrl(value) { try { var url = new URL(value, window.location.origin); return url.protocol === "https:" || url.protocol === "http:" || url.protocol === "mailto:"; } catch (error) { return false; } }
+  function isSafeHttpUrl(value) { if (typeof value !== "string" || !value.trim()) return false; try { var url = new URL(value, window.location.origin); return url.protocol === "https:" || url.protocol === "http:"; } catch (error) { return false; } }
+  function isSafeLinkUrl(value) { if (typeof value !== "string" || !value.trim()) return false; try { var url = new URL(value, window.location.origin); return url.protocol === "https:" || url.protocol === "http:" || url.protocol === "mailto:"; } catch (error) { return false; } }
   function normalize(value) { return String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); }
   function isContactRequest(message) { return /\b(kontakt\w*|email\w*|e-mail|mail\w*|telefon\w*|phone\w*|salesperson|prodejc\w*|podpor\w*|support|reklamac\w*|complaint\w*|return\w*|vraceni\w*)\b/.test(normalize(message)); }
   function showContact(displayMessage) {
