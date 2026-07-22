@@ -131,7 +131,11 @@
   function addResponseLinks(links) {
     var messages = document.getElementById("colourbond-ai-messages"); if (!messages || !Array.isArray(links)) return;
     var container = document.createElement("div"); container.className = "colourbond-ai-response-links";
-    links.forEach(function (item) { if (item && item.label) addAnchor(container, item.url, item.label); });
+    links.forEach(function (item) {
+      if (!item || !item.label) return;
+      if (container.childNodes.length) container.appendChild(document.createElement("br"));
+      addAnchor(container, item.url, item.label);
+    });
     if (container.childNodes.length) { messages.appendChild(container); messages.scrollTop = messages.scrollHeight; }
   }
   function isSafeHttpUrl(value) { try { var url = new URL(value, window.location.origin); return url.protocol === "https:" || url.protocol === "http:"; } catch (error) { return false; } }

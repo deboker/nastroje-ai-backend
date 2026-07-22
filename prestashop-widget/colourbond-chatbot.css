@@ -110,6 +110,7 @@
 .colourbond-ai-help-links a:hover { color: #e3000f; }
 
 .colourbond-ai-response-links { margin: -4px 0 12px; }
+.colourbond-ai-response-links br { display: none; }
 .colourbond-ai-response-links a { display: block; width: fit-content; margin-top: 6px; padding: 8px 10px; border-radius: 2px; background: #e3000f; color: #fff; font-size: 12px; font-weight: 700; text-decoration: none; }
 .colourbond-ai-response-links a:hover { background: #292929; color: #fff; }
 
