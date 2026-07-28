@@ -11,7 +11,9 @@
       welcome: "Dobrý den, jsem AI produktový poradce COLOUR BOND. Pomohu vám s výběrem produktu, jeho použitím, objednávkou nebo základními technickými dotazy. S čím vám mohu pomoci?",
       open: "Otevřít chat", close: "Zavřít chat", placeholder: "Napište dotaz...", send: "Odeslat", loading: "Čekám...",
       notice: "Jste v kontaktu s AI poradcem. Neposílejte hesla ani citlivé údaje; odpovědi jsou pouze informativní.",
-      unavailable: "Omlouváme se, poradce je právě nedostupný. Zkuste to prosím za chvíli.",
+      unavailable: "AI poradce se nepodařilo načíst. Zkuste dotaz odeslat znovu za chvíli.",
+      preparing: "AI poradce připravuje odpověď…",
+      slowLoading: "První odpověď může chvíli trvat. Děkujeme za trpělivost…",
       emptyReply: "Omlouvám se, nepodařilo se mi načíst odpověď.", productLink: "Zobrazit produkt",
       contactMessage: "Telefonická podpora momentálně není k dispozici. Napište nám na info@colourbond.cz nebo použijte kontaktní formulář.",
       email: "Napsat na info@colourbond.cz", contactForm: "Otevřít kontaktní formulář", helpfulContact: "Kontaktní formulář", videos: "Aplikační videa",
@@ -30,7 +32,9 @@
       welcome: "Hello, I am the COLOUR BOND AI Product Adviser. I can help you choose a product, understand its use, or answer basic questions about orders and applications. How can I help?",
       open: "Open chat", close: "Close chat", placeholder: "Type your question...", send: "Send", loading: "Waiting...",
       notice: "You are chatting with an AI adviser. Do not send passwords or sensitive data; answers are informational only.",
-      unavailable: "Sorry, the adviser is currently unavailable. Please try again shortly.",
+      unavailable: "The AI adviser could not be loaded. Please try sending your question again shortly.",
+      preparing: "The AI adviser is preparing a response…",
+      slowLoading: "The first response may take a moment. Thank you for your patience…",
       emptyReply: "Sorry, I could not load a response.", productLink: "View product",
       contactMessage: "Telephone support is currently unavailable. Please email us at info@colourbond.cz or use the contact form.",
       email: "Email info@colourbond.cz", contactForm: "Open contact form", helpfulContact: "Contact form", videos: "Application videos",
@@ -94,6 +98,7 @@
     var messages = document.getElementById("colourbond-ai-messages"); if (!messages) return;
     var item = document.createElement("div"); item.className = "colourbond-ai-message " + type; item.textContent = text;
     messages.appendChild(item); messages.scrollTop = messages.scrollHeight;
+    return item;
   }
   function addQuickActions() {
     var messages = document.getElementById("colourbond-ai-messages"); if (!messages) return;
@@ -151,18 +156,31 @@
     isSending = loading; var button = document.getElementById("colourbond-ai-send"); var input = document.getElementById("colourbond-ai-input");
     if (button) { button.disabled = loading; button.textContent = loading ? t.loading : t.send; } if (input) input.disabled = loading;
   }
-  function sendMessage(message, displayMessage, retriedAfterConflict) {
-    if (isSending && !retriedAfterConflict) return Promise.resolve();
-    if (!retriedAfterConflict) addMessage("user", displayMessage || message);
+  function sendMessage(message, displayMessage) {
+    if (isSending) return Promise.resolve();
+    addMessage("user", displayMessage || message);
     if (isContactRequest(message)) { showContact(); return Promise.resolve(); }
     setLoading(true);
-    var controller = window.AbortController ? new AbortController() : null;
-    var timeoutId = controller ? window.setTimeout(function () { controller.abort(); }, 25000) : null;
-    return fetch(PROXY_URL, { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller ? controller.signal : undefined, body: JSON.stringify({ message: message, conversation_id: conversationId, session_id: sessionId, language: language, assistant_name: t.assistantName, source_page_url: window.location.href }) })
-      .then(function (response) { return response.json().catch(function () { return {}; }).then(function (data) { if (!response.ok) { var error = new Error(data.error || "Chat request failed."); error.status = response.status; throw error; } return data; }); })
-      .then(function (data) { conversationId = data.conversationId || data.conversation_id || conversationId; addMessage("bot", data.reply || t.emptyReply); addProductCards(data.products); addResponseLinks(data.links); })
-      .catch(function (error) { if (error && error.status === 409 && !retriedAfterConflict) { conversationId = null; sessionId = createId("session"); window.localStorage.setItem(SESSION_STORAGE_KEY, sessionId); return sendMessage(message, displayMessage, true); } addMessage("bot", t.unavailable); })
-      .finally(function () { if (timeoutId) window.clearTimeout(timeoutId); setLoading(false); var input = document.getElementById("colourbond-ai-input"); if (input) input.focus(); });
+    var loadingMessage = addMessage("bot", t.preparing);
+    var slowTimer = window.setTimeout(function () { if (loadingMessage && loadingMessage.parentNode) loadingMessage.textContent = t.slowLoading; }, 15000);
+
+    function request(attempt, retriedAfterConflict) {
+      var controller = window.AbortController ? new AbortController() : null;
+      var timeoutId = controller ? window.setTimeout(function () { controller.abort(); }, 60000) : null;
+      return fetch(PROXY_URL, { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller ? controller.signal : undefined, body: JSON.stringify({ message: message, conversation_id: conversationId, session_id: sessionId, language: language, assistant_name: t.assistantName, source_page_url: window.location.href }) })
+        .then(function (response) { return response.json().catch(function () { return {}; }).then(function (data) { if (!response.ok) { var error = new Error(data.error || "Chat request failed."); error.status = response.status; throw error; } return data; }); })
+        .then(function (data) { if (loadingMessage && loadingMessage.parentNode) loadingMessage.parentNode.removeChild(loadingMessage); conversationId = data.conversationId || data.conversation_id || conversationId; addMessage("bot", data.reply || t.emptyReply); addProductCards(data.products); addResponseLinks(data.links); })
+        .catch(function (error) {
+          if (error && error.status === 409 && !retriedAfterConflict) { conversationId = null; sessionId = createId("session"); window.localStorage.setItem(SESSION_STORAGE_KEY, sessionId); return request(attempt, true); }
+          var retryable = !error || error.name === "AbortError" || error instanceof TypeError || !error.status || error.status === 502 || error.status === 503 || error.status === 504;
+          if (attempt === 0 && retryable) { if (loadingMessage && loadingMessage.parentNode) loadingMessage.textContent = t.slowLoading; return request(1, retriedAfterConflict); }
+          if (loadingMessage && loadingMessage.parentNode) loadingMessage.parentNode.removeChild(loadingMessage);
+          addMessage("bot", t.unavailable);
+        })
+        .finally(function () { if (timeoutId) window.clearTimeout(timeoutId); });
+    }
+
+    return request(0, false).finally(function () { window.clearTimeout(slowTimer); setLoading(false); var input = document.getElementById("colourbond-ai-input"); if (input) input.focus(); });
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", createWidget); else createWidget();
 })();
