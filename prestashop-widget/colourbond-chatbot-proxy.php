@@ -7,7 +7,7 @@
  */
 
 const COLOURBOND_AI_MAX_MESSAGE_LENGTH = 2000;
-const COLOURBOND_AI_PROXY_VERSION = 'localized-products-v9';
+const COLOURBOND_AI_PROXY_VERSION = 'localized-products-v10';
 
 require_once __DIR__ . '/config/config.inc.php';
 require_once __DIR__ . '/init.php';
@@ -158,42 +158,44 @@ function colourbond_chatbot_enrich_products($payload, $languageIso)
             $productId = (int) $localProductIds[$productTitle];
         }
 
-        if ($productTitle !== '' && $languageId > 0) {
+        if ($productId <= 0 && $productTitle !== '') {
             try {
-                $productSql = 'SELECT pl.id_product, pl.name, pl.link_rewrite, pl.description_short,'
-                    . ' (SELECT image_shop.id_image FROM `' . _DB_PREFIX_ . 'image_shop` image_shop'
-                    . ' WHERE image_shop.id_product = pl.id_product AND image_shop.cover = 1 LIMIT 1) AS cover_image_id'
-                    . ' FROM `' . _DB_PREFIX_ . 'product_lang` pl'
-                    . ' WHERE pl.id_lang = ' . (int) $languageId
-                    . ($productId > 0
-                        ? ' AND pl.id_product = ' . (int) $productId
-                        : " AND pl.name = '" . pSQL($productTitle) . "'");
+                $productSql = 'SELECT pl.id_product FROM `' . _DB_PREFIX_ . 'product_lang` pl'
+                    . " WHERE pl.name = '" . pSQL($productTitle) . "'";
                 if (isset($context->shop->id)) {
                     $productSql .= ' AND pl.id_shop = ' . (int) $context->shop->id;
                 }
                 $productSql .= ' LIMIT 1';
-                $localProduct = Db::getInstance()->getRow($productSql);
+                $productId = (int) Db::getInstance()->getValue($productSql);
             } catch (Throwable $error) {
-                // Product enrichment must never make an otherwise valid chat
-                // response fail. The backend URL remains as a safe fallback.
-                $localProduct = false;
+                $productId = 0;
             }
-            if (is_array($localProduct) && !empty($localProduct['id_product'])) {
-                $productId = (int) $localProduct['id_product'];
-                $localProductRewrite = isset($localProduct['link_rewrite'])
-                    ? (string) $localProduct['link_rewrite']
-                    : '';
-                $localCoverImageId = isset($localProduct['cover_image_id']) ? (int) $localProduct['cover_image_id'] : 0;
-                $localizedTitle = isset($localProduct['name']) ? trim((string) $localProduct['name']) : '';
+        }
+
+        if ($productId > 0 && $languageId > 0) {
+            try {
+                $shopId = isset($context->shop->id) ? (int) $context->shop->id : null;
+                $localizedProduct = new Product($productId, false, $languageId, $shopId);
+                if (!Validate::isLoadedObject($localizedProduct)) {
+                    throw new RuntimeException('Localized product was not found.');
+                }
+                $localProductRewrite = trim((string) $localizedProduct->link_rewrite);
+                $localizedTitle = trim((string) $localizedProduct->name);
                 if ($localizedTitle !== '') {
                     $product['title'] = $localizedTitle;
                 }
-                $localizedReason = isset($localProduct['description_short'])
-                    ? trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags((string) $localProduct['description_short']), ENT_QUOTES | ENT_HTML5, 'UTF-8')))
-                    : '';
+                $localizedReason = trim(preg_replace(
+                    '/\s+/u',
+                    ' ',
+                    html_entity_decode(strip_tags((string) $localizedProduct->description_short), ENT_QUOTES | ENT_HTML5, 'UTF-8')
+                ));
                 if ($localizedReason !== '') {
                     $product['reason'] = Tools::substr($localizedReason, 0, 220);
                 }
+            } catch (Throwable $error) {
+                // Keep the backend card unchanged if a localized catalogue row
+                // is unavailable or malformed.
+                $localProductRewrite = '';
             }
         }
 
