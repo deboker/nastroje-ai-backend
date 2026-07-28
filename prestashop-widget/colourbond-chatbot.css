@@ -13,8 +13,8 @@
   justify-content: center;
   width: 58px;
   height: 58px;
-  border: 0;
-  border-radius: 2px;
+  border: 1px solid #e3000f;
+  border-radius: 5px;
   background: #e3000f;
   color: #fff;
   font-size: 25px;
@@ -29,24 +29,24 @@
   color: #fff;
 }
 
-#colourbond-ai-button:hover,
-#colourbond-ai-send:hover { background: #292929; }
+#colourbond-ai-button:hover .colourbond-ai-button-icon { color: #e3000f; }
+#colourbond-ai-button:hover { background: #f5f5f5; color: #e3000f; border: 2px solid #e3000f; }
+#colourbond-ai-send:hover { background: transparent; color: #e3000f; border: 1px solid #e3000f; }
 
 #colourbond-ai-window {
   display: none;
-  position: fixed;
-  top: 50%;
-  right: 24px;
-  transform: translateY(-50%);
+  position: absolute;
+  right: 0;
+  bottom: 74px;
   width: 360px;
   max-width: calc(100vw - 32px);
   height: 500px;
-  max-height: calc(100vh - 32px);
-  max-height: calc(100dvh - 32px);
+  max-height: calc(100vh - 120px);
+  max-height: calc(100dvh - 120px);
   overflow: hidden;
   background: #fff;
   border: 1px solid #f5f5f5;
-  border-radius: 2px;
+  border-radius: 5px;
   box-shadow: 0 10px 35px rgba(0, 0, 0, 0.22);
 }
 
@@ -73,7 +73,7 @@
   height: 30px;
   padding: 0;
   border: 0;
-  border-radius: 2px;
+  border-radius: 5px;
   background: transparent;
   color: #fff;
   font-size: 28px;
@@ -95,7 +95,7 @@
   max-width: 85%;
   margin-bottom: 12px;
   padding: 10px 12px;
-  border-radius: 2px;
+  border-radius: 5px;
   font-size: 14px;
   line-height: 1.45;
   white-space: pre-wrap;
@@ -106,7 +106,7 @@
 .colourbond-ai-message.user { margin-left: auto; background: #e3000f; border: 1px solid #e3000f; color: #fff; }
 
 .colourbond-ai-quick-actions { display: grid; grid-template-columns: 1fr; gap: 7px; margin: -4px 0 12px; }
-.colourbond-ai-quick-actions button { padding: 10px 12px; border: 1px solid #e3000f; border-radius: 2px; background: #fff; color: #e3000f; font: inherit; font-size: 13px; font-weight: 700; text-align: left; cursor: pointer; }
+.colourbond-ai-quick-actions button { padding: 10px 12px; border: 1px solid #e3000f; border-radius: 5px; background: #fff; color: #e3000f; font: inherit; font-size: 13px; font-weight: 700; text-align: left; cursor: pointer; }
 .colourbond-ai-quick-actions button:hover { background: #e3000f; color: #fff; }
 .colourbond-ai-help-links { display: flex; flex-wrap: wrap; gap: 10px; margin: -2px 0 14px; font-size: 12px; }
 .colourbond-ai-help-links a { color: #636363; text-decoration: underline; }
@@ -114,32 +114,32 @@
 
 .colourbond-ai-response-links { margin: -4px 0 12px; }
 .colourbond-ai-response-links br { display: none; }
-.colourbond-ai-response-links a { display: block; width: fit-content; margin-top: 6px; padding: 8px 10px; border-radius: 2px; background: #e3000f; color: #fff; font-size: 12px; font-weight: 700; text-decoration: none; }
-.colourbond-ai-response-links a:hover { background: #292929; color: #fff; }
+.colourbond-ai-response-links a { display: block; width: fit-content; margin-top: 6px; padding: 8px 10px; border-radius: 5px; background: #e3000f; color: #fff; font-size: 12px; font-weight: 700; text-decoration: none; }
+.colourbond-ai-response-links a:hover { background: transparent; color: #e3000f; border: 1px solid #e3000f; }
 
 .colourbond-ai-form { display: flex; gap: 8px; padding: 12px; border-top: 1px solid #f5f5f5; background: #fff; }
-#colourbond-ai-input { flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid #d9d9d9; border-radius: 2px; outline: none; color: #636363; font: inherit; font-size: 14px; }
+#colourbond-ai-input { flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid #d9d9d9; border-radius: 5px; outline: none; color: #636363; font: inherit; font-size: 14px; }
 #colourbond-ai-input:focus { border-color: #e3000f; }
 #colourbond-ai-input::placeholder { color: #636363; opacity: 0.75; }
-#colourbond-ai-send { border: 0; border-radius: 2px; padding: 10px 16px; background: #e3000f; color: #fff; font-size: 14px; cursor: pointer; }
+#colourbond-ai-send { border: 0; border-radius: 5px; padding: 10px 16px; background: #e3000f; color: #fff; font-size: 14px; cursor: pointer; }
 #colourbond-ai-send:disabled { cursor: not-allowed; opacity: 0.6; }
 .colourbond-ai-notice { margin: 0; padding: 0 12px 12px; background: #fff; color: #777; font-size: 10px; line-height: 1.35; }
 
 .colourbond-ai-products { display: grid; gap: 8px; margin: -4px 0 12px; }
-.colourbond-ai-product-card { display: flex; gap: 10px; padding: 10px; background: #fff; border: 1px solid #e5e5e5; border-radius: 2px; }
+.colourbond-ai-product-card { display: flex; gap: 10px; padding: 10px; background: #fff; border: 1px solid #e5e5e5; border-radius: 5px; }
 .colourbond-ai-product-image { width: 64px; height: 64px; flex: 0 0 64px; object-fit: cover; border: 1px solid #f5f5f5; }
 .colourbond-ai-product-body { min-width: 0; flex: 1; }
 .colourbond-ai-product-title { margin: 0 0 4px; color: #292929; font-size: 14px; line-height: 1.3; }
 .colourbond-ai-product-meta { margin: 0 0 6px; color: #636363; font-size: 12px; line-height: 1.35; }
 .colourbond-ai-product-reason { margin: 0 0 8px; color: #636363; font-size: 12px; line-height: 1.4; }
-.colourbond-ai-product-link { display: inline-block; padding: 7px 10px; border-radius: 2px; background: #e3000f; color: #fff; font-size: 12px; font-weight: 700; text-decoration: none; }
-.colourbond-ai-product-link:hover { background: #292929; color: #fff; }
+.colourbond-ai-product-link { display: inline-block; padding: 7px 10px; border-radius: 5px; background: #e3000f; border: #e3000f 1px solid; color: #fff !important; font-size: 12px; font-weight: 700; text-decoration: none; }
+.colourbond-ai-product-link:hover { background: transparent; color: #e3000f !important; border: #e3000f 1px solid; }
 .colourbond-ai-sources { display: flex; gap: 8px; margin: -4px 0 12px; font-size: 11px; }
 .colourbond-ai-sources a { color: #636363; text-decoration: underline; }
 .colourbond-ai-sources a:hover { color: #e3000f; }
 
 @media (max-width: 480px) {
   #colourbond-ai-chatbot { right: 16px; bottom: 16px; }
-  #colourbond-ai-window { right: 16px; width: calc(100vw - 32px); height: 460px; max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); }
+  #colourbond-ai-window { right: 0; width: calc(100vw - 32px); height: 460px; max-height: calc(100vh - 106px); max-height: calc(100dvh - 106px); }
   #colourbond-ai-button { width: 54px; height: 54px; }
 }
