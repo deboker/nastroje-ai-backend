@@ -7,7 +7,7 @@
  */
 
 const COLOURBOND_AI_MAX_MESSAGE_LENGTH = 2000;
-const COLOURBOND_AI_PROXY_VERSION = 'bilingual-assistant-v8';
+const COLOURBOND_AI_PROXY_VERSION = 'localized-products-v9';
 
 require_once __DIR__ . '/config/config.inc.php';
 require_once __DIR__ . '/init.php';
@@ -76,17 +76,20 @@ function colourbond_chatbot_same_origin_request()
 }
 
 /**
- * Resolves a PrestaShop cover image on this server. The browser receives only
- * the public image URL, never any backend token or image configuration secret.
+ * Localizes product cards and resolves their cover images in this PrestaShop.
+ * The browser receives only public catalogue data and never backend secrets.
  */
-function colourbond_chatbot_enrich_product_images($payload)
+function colourbond_chatbot_enrich_products($payload, $languageIso)
 {
     if (!is_array($payload) || empty($payload['products']) || !is_array($payload['products'])) {
         return $payload;
     }
 
     $context = Context::getContext();
-    $languageId = isset($context->language->id) ? (int) $context->language->id : null;
+    $languageId = (int) Language::getIdByIso($languageIso);
+    if ($languageId <= 0) {
+        $languageId = isset($context->language->id) ? (int) $context->language->id : 0;
+    }
     $productUrlsByTitle = array();
     $requestIsSecure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
         || (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https');
@@ -142,7 +145,7 @@ function colourbond_chatbot_enrich_product_images($payload)
         // rebuilt development shop. Resolve the local product by its exact
         // translated name before falling back to the ID returned by the AI
         // backend.
-        $productId = 0;
+        $productId = isset($product['product_id']) ? (int) $product['product_id'] : 0;
         $localProductRewrite = '';
         $localCoverImageId = 0;
         $productTitle = isset($product['title']) ? trim((string) $product['title']) : '';
@@ -151,15 +154,19 @@ function colourbond_chatbot_enrich_product_images($payload)
             $product['url'] = $shopBaseUrl . $localProductPaths[$productTitle];
         }
 
-        if ($productTitle !== '' && $languageId) {
+        if (isset($localProductIds[$productTitle])) {
+            $productId = (int) $localProductIds[$productTitle];
+        }
+
+        if ($productTitle !== '' && $languageId > 0) {
             try {
-                $productSql = 'SELECT pl.id_product, pl.link_rewrite,'
+                $productSql = 'SELECT pl.id_product, pl.name, pl.link_rewrite, pl.description_short,'
                     . ' (SELECT image_shop.id_image FROM `' . _DB_PREFIX_ . 'image_shop` image_shop'
                     . ' WHERE image_shop.id_product = pl.id_product AND image_shop.cover = 1 LIMIT 1) AS cover_image_id'
                     . ' FROM `' . _DB_PREFIX_ . 'product_lang` pl'
                     . ' WHERE pl.id_lang = ' . (int) $languageId
-                    . (isset($localProductIds[$productTitle])
-                        ? ' AND pl.id_product = ' . (int) $localProductIds[$productTitle]
+                    . ($productId > 0
+                        ? ' AND pl.id_product = ' . (int) $productId
                         : " AND pl.name = '" . pSQL($productTitle) . "'");
                 if (isset($context->shop->id)) {
                     $productSql .= ' AND pl.id_shop = ' . (int) $context->shop->id;
@@ -177,23 +184,35 @@ function colourbond_chatbot_enrich_product_images($payload)
                     ? (string) $localProduct['link_rewrite']
                     : '';
                 $localCoverImageId = isset($localProduct['cover_image_id']) ? (int) $localProduct['cover_image_id'] : 0;
+                $localizedTitle = isset($localProduct['name']) ? trim((string) $localProduct['name']) : '';
+                if ($localizedTitle !== '') {
+                    $product['title'] = $localizedTitle;
+                }
+                $localizedReason = isset($localProduct['description_short'])
+                    ? trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags((string) $localProduct['description_short']), ENT_QUOTES | ENT_HTML5, 'UTF-8')))
+                    : '';
+                if ($localizedReason !== '') {
+                    $product['reason'] = Tools::substr($localizedReason, 0, 220);
+                }
             }
         }
 
-        if ($productId > 0 && $localProductRewrite !== '' && !isset($localProductPaths[$productTitle])) {
-            $shopBasePath = defined('__PS_BASE_URI__') ? trim((string) __PS_BASE_URI__, '/') : '';
-            if ($shopBasePath !== '') {
-                $shopBaseUrl .= '/' . $shopBasePath;
+        if ($productId > 0 && $localProductRewrite !== '' && $languageId > 0) {
+            try {
+                $shopId = isset($context->shop->id) ? (int) $context->shop->id : null;
+                $product['url'] = $context->link->getProductLink(
+                    $productId,
+                    $localProductRewrite,
+                    null,
+                    null,
+                    $languageId,
+                    $shopId
+                );
+            } catch (Throwable $error) {
+                $languagePrefix = $languageIso === 'en' ? '/en' : '';
+                $product['url'] = $shopBaseUrl . $languagePrefix . '/' . $productId
+                    . '-' . rawurlencode($localProductRewrite) . '.html';
             }
-            $product['url'] = $shopBaseUrl
-                . '/' . $productId
-                . '-' . rawurlencode($localProductRewrite)
-                . '.html';
-        }
-
-        if ($productId > 0 && $localProductRewrite !== '' && $languageId && isset($context->language->iso_code)
-            && strtolower((string) $context->language->iso_code) === 'en') {
-            $product['url'] = $shopBaseUrl . '/en/' . $productId . '-' . rawurlencode($localProductRewrite) . '.html';
         }
 
         if ($localCoverImageId <= 0 && $productId > 0) {
@@ -208,8 +227,16 @@ function colourbond_chatbot_enrich_product_images($payload)
         }
 
         if ($localCoverImageId > 0 && $localProductRewrite !== '') {
-            $product['image_url'] = $shopBaseUrl . '/' . $localCoverImageId
-                . '-home_default/' . rawurlencode($localProductRewrite) . '.jpg';
+            try {
+                $product['image_url'] = $context->link->getImageLink(
+                    $localProductRewrite,
+                    $localCoverImageId,
+                    'home_default'
+                );
+            } catch (Throwable $error) {
+                $product['image_url'] = $shopBaseUrl . '/' . $localCoverImageId
+                    . '-home_default/' . rawurlencode($localProductRewrite) . '.jpg';
+            }
         }
 
         // These are server-side lookup fields, not part of the public widget contract.
@@ -217,7 +244,10 @@ function colourbond_chatbot_enrich_product_images($payload)
         $payload['products'][$index] = $product;
 
         if (!empty($product['title']) && !empty($product['url'])) {
-            $productUrlsByTitle[(string) $product['title']] = (string) $product['url'];
+            $productUrlsByTitle[$productTitle] = array(
+                'title' => (string) $product['title'],
+                'url' => (string) $product['url'],
+            );
         }
     }
 
@@ -230,7 +260,8 @@ function colourbond_chatbot_enrich_product_images($payload)
             }
             $title = (string) $source['title'];
             if (isset($productUrlsByTitle[$title])) {
-                $source['url'] = $productUrlsByTitle[$title];
+                $source['title'] = $productUrlsByTitle[$title]['title'];
+                $source['url'] = $productUrlsByTitle[$title]['url'];
                 $payload['sources'][$index] = $source;
             }
         }
@@ -309,7 +340,7 @@ curl_setopt_array($curl, array(
     ),
     CURLOPT_RETURNTRANSFER => true,
     CURLOPT_CONNECTTIMEOUT => 10,
-    CURLOPT_TIMEOUT => 30,
+    CURLOPT_TIMEOUT => 55,
 ));
 
 $backendResponse = curl_exec($curl);
@@ -330,7 +361,7 @@ http_response_code($backendStatus);
 $decodedResponse = json_decode($backendResponse, true);
 if (is_array($decodedResponse)) {
     try {
-        echo json_encode(colourbond_chatbot_enrich_product_images($decodedResponse));
+        echo json_encode(colourbond_chatbot_enrich_products($decodedResponse, $language));
     } catch (Throwable $error) {
         error_log('Colourbond chatbot product enrichment failed: ' . $error->getMessage());
         echo json_encode($decodedResponse);
