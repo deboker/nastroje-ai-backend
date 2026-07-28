@@ -97,8 +97,17 @@
   function addMessage(type, text) {
     var messages = document.getElementById("colourbond-ai-messages"); if (!messages) return;
     var item = document.createElement("div"); item.className = "colourbond-ai-message " + type; item.textContent = text;
-    messages.appendChild(item); messages.scrollTop = messages.scrollHeight;
+    messages.appendChild(item);
     return item;
+  }
+  function scrollToAssistantMessage(item) {
+    var messages = document.getElementById("colourbond-ai-messages");
+    if (!messages || !item) return;
+    window.requestAnimationFrame(function () {
+      var messagesRect = messages.getBoundingClientRect();
+      var itemRect = item.getBoundingClientRect();
+      messages.scrollTo({ top: messages.scrollTop + itemRect.top - messagesRect.top - 16, behavior: "smooth" });
+    });
   }
   function addQuickActions() {
     var messages = document.getElementById("colourbond-ai-messages"); if (!messages) return;
@@ -130,7 +139,7 @@
       if (isSafeHttpUrl(product.url)) addAnchor(body, product.url, t.productLink);
       card.appendChild(body); container.appendChild(card);
     });
-    if (container.childNodes.length) { messages.appendChild(container); messages.scrollTop = messages.scrollHeight; }
+    if (container.childNodes.length) messages.appendChild(container);
   }
   function appendText(parent, tag, className, text) { var element = document.createElement(tag); element.className = className; element.textContent = String(text); parent.appendChild(element); }
   function addResponseLinks(links) {
@@ -141,7 +150,7 @@
       if (container.childNodes.length) container.appendChild(document.createElement("br"));
       addAnchor(container, item.url, item.label);
     });
-    if (container.childNodes.length) { messages.appendChild(container); messages.scrollTop = messages.scrollHeight; }
+    if (container.childNodes.length) messages.appendChild(container);
   }
   function isSafeHttpUrl(value) { if (typeof value !== "string" || !value.trim()) return false; try { var url = new URL(value, window.location.origin); return url.protocol === "https:" || url.protocol === "http:"; } catch (error) { return false; } }
   function isSafeLinkUrl(value) { if (typeof value !== "string" || !value.trim()) return false; try { var url = new URL(value, window.location.origin); return url.protocol === "https:" || url.protocol === "http:" || url.protocol === "mailto:"; } catch (error) { return false; } }
@@ -149,8 +158,9 @@
   function isContactRequest(message) { return /\b(kontakt\w*|email\w*|e-mail|mail\w*|telefon\w*|phone\w*|salesperson|prodejc\w*|podpor\w*|support|reklamac\w*|complaint\w*|return\w*|vraceni\w*)\b/.test(normalize(message)); }
   function showContact(displayMessage) {
     if (displayMessage) addMessage("user", displayMessage);
-    addMessage("bot", t.contactMessage);
+    var assistantMessage = addMessage("bot", t.contactMessage);
     addResponseLinks([{ label: t.email, url: "mailto:info@colourbond.cz" }, { label: t.contactForm, url: t.contactUrl }]);
+    scrollToAssistantMessage(assistantMessage);
   }
   function setLoading(loading) {
     isSending = loading; var button = document.getElementById("colourbond-ai-send"); var input = document.getElementById("colourbond-ai-input");
@@ -169,13 +179,14 @@
       var timeoutId = controller ? window.setTimeout(function () { controller.abort(); }, 60000) : null;
       return fetch(PROXY_URL, { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller ? controller.signal : undefined, body: JSON.stringify({ message: message, conversation_id: conversationId, session_id: sessionId, language: language, assistant_name: t.assistantName, source_page_url: window.location.href }) })
         .then(function (response) { return response.json().catch(function () { return {}; }).then(function (data) { if (!response.ok) { var error = new Error(data.error || "Chat request failed."); error.status = response.status; throw error; } return data; }); })
-        .then(function (data) { if (loadingMessage && loadingMessage.parentNode) loadingMessage.parentNode.removeChild(loadingMessage); conversationId = data.conversationId || data.conversation_id || conversationId; addMessage("bot", data.reply || t.emptyReply); addProductCards(data.products); addResponseLinks(data.links); })
+        .then(function (data) { if (loadingMessage && loadingMessage.parentNode) loadingMessage.parentNode.removeChild(loadingMessage); conversationId = data.conversationId || data.conversation_id || conversationId; var assistantMessage = addMessage("bot", data.reply || t.emptyReply); addProductCards(data.products); addResponseLinks(data.links); scrollToAssistantMessage(assistantMessage); })
         .catch(function (error) {
           if (error && error.status === 409 && !retriedAfterConflict) { conversationId = null; sessionId = createId("session"); window.localStorage.setItem(SESSION_STORAGE_KEY, sessionId); return request(attempt, true); }
           var retryable = !error || error.name === "AbortError" || error instanceof TypeError || !error.status || error.status === 502 || error.status === 503 || error.status === 504;
           if (attempt === 0 && retryable) { if (loadingMessage && loadingMessage.parentNode) loadingMessage.textContent = t.slowLoading; return request(1, retriedAfterConflict); }
           if (loadingMessage && loadingMessage.parentNode) loadingMessage.parentNode.removeChild(loadingMessage);
-          addMessage("bot", t.unavailable);
+          var assistantMessage = addMessage("bot", t.unavailable);
+          scrollToAssistantMessage(assistantMessage);
         })
         .finally(function () { if (timeoutId) window.clearTimeout(timeoutId); });
     }
