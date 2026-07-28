@@ -114,8 +114,8 @@
 
 .colourbond-ai-response-links { margin: -4px 0 12px; }
 .colourbond-ai-response-links br { display: none; }
-.colourbond-ai-response-links a { display: block; width: fit-content; margin-top: 6px; padding: 8px 10px; border-radius: 5px; background: #e3000f; color: #fff; font-size: 12px; font-weight: 700; text-decoration: none; }
-.colourbond-ai-response-links a:hover { background: transparent; color: #e3000f; border: 1px solid #e3000f; }
+.colourbond-ai-response-links a { display: block; width: fit-content; margin-top: 6px; padding: 8px 10px; border-radius: 5px; background: #e3000f; border: 1px solid #e3000f; color: #fff !important; font-size: 12px; font-weight: 700; text-decoration: none; }
+.colourbond-ai-response-links a:hover { background: transparent; color: #e3000f !important; border: 1px solid #e3000f; }
 
 .colourbond-ai-form { display: flex; gap: 8px; padding: 12px; border-top: 1px solid #f5f5f5; background: #fff; }
 #colourbond-ai-input { flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid #d9d9d9; border-radius: 5px; outline: none; color: #636363; font: inherit; font-size: 14px; }
