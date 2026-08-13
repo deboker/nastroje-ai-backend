@@ -38,7 +38,7 @@ Express + Supabase starter backend for the WordPress plugin.
 ## LLM Provider
 
 - `GROQ_API_KEY` enables the Groq-backed provider.
-- `GROQ_MODEL` defaults to `llama-3.1-8b-instant`.
+- `GROQ_MODEL` defaults to `openai/gpt-oss-20b`.
 - Chat requests are still grounded in synced site content from Supabase before the model answers.
 - The backend keeps one provider key server-side for all tenant sites. Tenant isolation still happens through `site_id` and `site_token`.
 
