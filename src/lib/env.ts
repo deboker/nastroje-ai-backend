@@ -8,7 +8,7 @@ const envSchema = z.object({
   SUPABASE_URL: z.string().url(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
   GROQ_API_KEY: z.string().min(1).optional(),
-  GROQ_MODEL: z.string().default('llama-3.1-8b-instant'),
+  GROQ_MODEL: z.string().default('openai/gpt-oss-20b'),
   CORS_ORIGIN: z.string().default('*'),
   OPEN_SITE_REGISTRATION: z.enum(['true', 'false']).default('false'),
   DEFAULT_LANGUAGE: z.string().default('sk'),
