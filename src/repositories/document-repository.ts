@@ -64,6 +64,10 @@ const TERM_ALIASES: Record<string, string[]> = {
   pistole: ['pistole', 'aplikace', 'kartuse', 'tryska'],
   tryska: ['tryska', 'pistole', 'kartuse', 'aplikace'],
   prislusenstvi: ['prislusenstvi', 'tryska', 'pistole', 'kartuse', 'aplikace'],
+  venku: ['venku', 'venkovni', 'exterier', 'exterieru', 'exteriery'],
+  venkovni: ['venkovni', 'venku', 'exterier', 'exterieru', 'exteriery'],
+  exterier: ['exterier', 'exterieru', 'exteriery', 'venku', 'venkovni'],
+  exterieru: ['exterier', 'exterieru', 'exteriery', 'venku', 'venkovni'],
 };
 
 const EXTERNAL_BRANDS = ['sikabond', 'masterseal'];
@@ -295,6 +299,23 @@ export class DocumentRepository {
       score += phraseScore(content, 'umely kamen', 16);
       score += phraseScore(content, 'jolly hran', 20);
       score += phraseScore(content, 'viditelne spoje', 20);
+
+      // Constraint-aware boost: lift products whose catalogue text explicitly
+      // matches the query's material/outdoor markers. Pure keyword frequency
+      // otherwise ranks own-brand/category matches above the actual best
+      // constraint match (e.g. EVERCLEAR 510 for ceramic + exterior).
+      const wantsOutdoor = /\b(venk\w*|exteri\w*|outdoor\w*|mraz\w*|frost\w*|povetrnost\w*|dest\w*|rain\w*)\b/u.test(query.directProduct);
+      const wantsCeramic = /\b(keram\w*|gres\w*|ceramic\w*|porcelain\w*)\b/u.test(query.directProduct);
+      const wantsWood = /\b(drev\w*|wood\w*)\b/u.test(query.directProduct);
+      const wantsMetal = /\b(kov\w*|metal\w*)\b/u.test(query.directProduct);
+      const wantsStone = /\b(prirodn\w* kamen\w*|umel\w* kamen\w*|zul\w*|granit\w*|granite|mramor\w*|marble)\b/u.test(query.directProduct);
+      const wantsGlass = /\b(sklo|skla|glass)\b/u.test(query.directProduct);
+      if (wantsOutdoor && /\b(exterier\w*|venk\w*|outdoor\w*|mraz\w*|frost\w*|povetrnost\w* vliv\w*|weather\w* resist\w*)\b/u.test(content)) score += 45;
+      if (wantsCeramic && /\b(keram\w*|gres\w*|ceramic\w*|porcelain\w*)\b/u.test(content)) score += 45;
+      if (wantsWood && /\b(drev\w*|wood\w*)\b/u.test(content)) score += 45;
+      if (wantsMetal && /\b(kov\w*|metal\w*)\b/u.test(content)) score += 45;
+      if (wantsStone && /\b(kamen\w*|zul\w*|granit\w*|mramor\w*)\b/u.test(content)) score += 45;
+      if (wantsGlass && /\b(sklo|skla|skl[eei]\w*|glass)\b/u.test(content)) score += 45;
     }
 
     if (query.cleaning) {

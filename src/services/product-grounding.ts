@@ -94,6 +94,12 @@ const LOCATION_OR_EXPOSURE_PATTERN = /\b(interier\w*|indoor\w*|inside|uvnitr\w*|
 
 const NEW_TOPIC_PATTERN = /\b(neco jineho|jiny produkt|jine lepidlo|odlisny produkt|novy produkt|novy pozadavek|hledam (?:jiny|novy) produkt|different product|another product|new product|new request|looking for (?:a )?(?:different|new) product|now i need)\b/u;
 
+// A message that names a specific catalogue brand/product is treated as a
+// standalone question — it must not silently inherit an unrelated material
+// from the previous turn (e.g. asking about Colour Bond P+ after a granite
+// query should not pull "granite" into the new question).
+const SPECIFIC_PRODUCT_PATTERN = /\b(colour bond|color bond|akenova|akepox|everclear|platinum|jollynator|acryclean|acid cistic|cistic [ai])\b/u;
+
 // Narrow, single-turn context helper. If the current message adds location or
 // exposure but no new material, and the immediately preceding user turn had a
 // recognized material, produce a combined query for retrieval and grounding.
@@ -104,6 +110,7 @@ export function resolveContextualQuery(question: string, conversationHistory: Co
   if (hasRecognizedMaterial(normalizedCurrent)) return question;
   if (!LOCATION_OR_EXPOSURE_PATTERN.test(normalizedCurrent)) return question;
   if (NEW_TOPIC_PATTERN.test(normalizedCurrent)) return question;
+  if (SPECIFIC_PRODUCT_PATTERN.test(normalizedCurrent)) return question;
 
   for (let index = conversationHistory.length - 1; index >= 0; index -= 1) {
     const turn = conversationHistory[index];

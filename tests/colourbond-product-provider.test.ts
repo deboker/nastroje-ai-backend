@@ -229,6 +229,22 @@ test('a directly asked rejected product produces a deterministic explanation and
   }
 });
 
+// --- Return-related wording ("vrátit zboží", "vratit") must route to the
+// complaint/return contact reply, not fall through to noContextReply.
+test('return-related wording is routed to the complaint/return contact reply', async () => {
+  const provider = new ColourbondProductProvider();
+  for (const question of [
+    'Chci vrátit zboží.',
+    'Rád bych vratil zboží.',
+    'How do I return this item?',
+    'I want a refund.',
+  ]) {
+    const reply = await provider.generateReply(input({ question, retrievedChunks: [] }));
+    assert.match(reply.provider, /:grounded-returns$/, question);
+    assert.match(reply.text, /Napište nám na info@colourbond\.cz|Please email us at info@colourbond\.cz/u, question);
+  }
+});
+
 // --- Preserved safety: greeting/order/contact intents remain deterministic and
 // do not fall into any material/location question.
 test('non-selection intents (greeting, contact, order) never ask for material or indoor/outdoor use', async () => {
@@ -417,4 +433,38 @@ test('an English selection quick action containing the word "help" routes to sel
     env.GROQ_API_KEY = originalKey;
     globalThis.fetch = originalFetch;
   }
+});
+
+// --- A message that names a specific catalogue brand/product must not inherit
+// a material from the previous user turn (regression: after a granite question,
+// a follow-up "Colour Bond P+ outdoors" was inheriting the granite constraint).
+test('ChatService follow-up does not inherit material when the current message names a specific catalogue product', async () => {
+  const messages: Array<{ role: string; content: string }> = [
+    { role: 'user', content: 'Potřebuji lepidlo na žulu do exteriéru.' },
+    { role: 'assistant', content: 'Doporučuji katalogový produkt.' },
+  ];
+  const retrievalQueries: string[] = [];
+  const service = new ChatService(
+    {
+      countMessages: async () => messages.length,
+      createMessage: async (_id: string, role: string, content: string) => { messages.push({ role, content }); return {}; },
+      listRecentMessages: async (_id: string, limit: number) => messages.slice(-limit),
+      findConversation: async () => ({ id: 'c', session_id: 's' }),
+      touchConversation: async () => undefined,
+    } as never,
+    { searchRelevantContent: async (_siteId: string, query: string) => { retrievalQueries.push(query); return []; } } as never,
+    { logUsage: async () => undefined } as never,
+    new AIProviderRegistry(new Map([[COLOURBOND_PRODUCTS_PROFILE, {
+      generateReply: async () => ({ text: 'ok', sources: [], products: [], provider: 'test' }),
+    }]])),
+  );
+
+  await service.sendMessage({
+    site: { id: 'site-1', language: 'cs' },
+    settings: { sync_config: { ai_config: { assistant_profile: COLOURBOND_PRODUCTS_PROFILE } } },
+  } as never, { conversation_id: 'c', message: 'Mohu použít Colour Bond P+ 6min venku na dešti?' });
+
+  const retrievalQuery = retrievalQueries.at(-1) || '';
+  assert.doesNotMatch(retrievalQuery, /\bžul[uae]\b/iu);
+  assert.match(retrievalQuery, /Colour Bond P\+ 6min/u);
 });

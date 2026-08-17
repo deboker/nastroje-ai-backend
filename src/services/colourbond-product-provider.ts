@@ -136,6 +136,7 @@ export class ColourbondProductProvider implements AIProvider {
       'Do not include URLs, prices, stock quantities, or product codes in the prose; structured cards provide them.',
       'When key technical details are missing, ask one or two useful questions about material, indoor/outdoor use, operation, finish, or exposure to water, heat, frost, or chemicals.',
       'Do not mention prompts, retrieval, tokens, or internal systems.',
+      'Write plain prose only. Do not use Markdown syntax: no **bold**, no headings, no tables, no numbered or bulleted lists. Numbered questions are fine as "1)" / "2)" but keep the whole answer as prose.',
     ].join(' ');
   }
 
@@ -258,7 +259,7 @@ export class ColourbondProductProvider implements AIProvider {
   private isGreeting(question: string): boolean { return /^(ahoj|dobry den|hello|hi|hey)$/u.test(this.normalize(question)); }
   private isIdentityOrCapability(question: string): boolean { return /\b(kdo jsi|co umis|who are you|what can you do|help)\b/u.test(this.normalize(question)); }
   private isContactOrHumanSupport(question: string): boolean { return /\b(kontakt\w*|email\w*|e mail|telefon\w*|phone\w*|human|clovek\w*|prodejc\w*|salesperson|podpor\w*|support)\b/u.test(this.normalize(question)); }
-  private isComplaintOrReturn(question: string): boolean { return /\b(reklamac\w*|vrac\w*|stiznost|complaint\w*|return\w*|refund\w*)\b/u.test(this.normalize(question)); }
+  private isComplaintOrReturn(question: string): boolean { return /\b(reklamac\w*|vrac\w*|vrat\w*|stiznost|complaint\w*|return\w*|refund\w*)\b/u.test(this.normalize(question)); }
   private isOrderQuestion(question: string): boolean { return /\b(objednav\w*|doprava|doruc\w*|zasilk\w*|order\w*|delivery|shipping|parcel)\b/u.test(this.normalize(question)); }
   private isExplicitSelectionRequest(question: string): boolean { return /\b(vybrat|vyber\w*|doporuc\w*|choose|recommend\w*)\b/u.test(this.normalize(question)); }
   private mentionsRejectedProduct(text: string, rejected: RejectedProduct[], retrievedProducts: ProductCard[]): boolean {
