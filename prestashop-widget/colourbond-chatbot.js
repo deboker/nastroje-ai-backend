@@ -168,10 +168,11 @@
   }
   function sendMessage(message, displayMessage) {
     if (isSending) return Promise.resolve();
-    addMessage("user", displayMessage || message);
+    var userMessage = addMessage("user", displayMessage || message);
     if (isContactRequest(message)) { showContact(); return Promise.resolve(); }
     setLoading(true);
     var loadingMessage = addMessage("bot", t.preparing);
+    scrollToAssistantMessage(userMessage);
     var slowTimer = window.setTimeout(function () { if (loadingMessage && loadingMessage.parentNode) loadingMessage.textContent = t.slowLoading; }, 15000);
 
     function request(attempt, retriedAfterConflict) {
