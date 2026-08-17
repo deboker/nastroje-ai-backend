@@ -51,6 +51,33 @@ test('cards include only products named in the answer and are limited to three',
   );
 });
 
+test('eligible products preserve retrieval order and rejected products never become cards', () => {
+  const products = [
+    { product: product('Colour Bond P+ 6min'), catalogueText: 'Keramika a gres. Pouze pro interiér.' },
+    { product: product('EVERCLEAR 510'), catalogueText: 'Techno keramika. Bez omezení pro exteriér a cykly mrazu.' },
+    { product: product('AKENOVA CLEAR 300'), catalogueText: 'Keramika pro vnitřní a venkovní použití.' },
+    { product: product('Fourth suitable product'), catalogueText: 'Keramika pro exteriér.' },
+  ];
+  const result = partitionProducts(products, 'Lepidlo na keramiku do exteriéru.');
+
+  assert.deepEqual(result.eligible.map((candidate) => candidate.product.title), [
+    'EVERCLEAR 510',
+    'AKENOVA CLEAR 300',
+    'Fourth suitable product',
+  ]);
+  assert.deepEqual(result.rejected.map((candidate) => candidate.product.title), ['Colour Bond P+ 6min']);
+
+  const cards = selectMentionedProducts(
+    'EVERCLEAR 510, AKENOVA CLEAR 300 a Fourth suitable product. Colour Bond P+ 6min není vhodný.',
+    result.eligible.map((candidate) => candidate.product),
+  );
+  assert.deepEqual(cards.map((candidate) => candidate.title), [
+    'EVERCLEAR 510',
+    'AKENOVA CLEAR 300',
+    'Fourth suitable product',
+  ]);
+});
+
 test('card text ends at a complete sentence when possible', () => {
   const text = 'První úplná věta obsahuje podstatnou informaci. Druhá věta je velmi dlouhá a neměla by být oříznuta uprostřed slova bez označení.';
   assert.equal(truncateAtSentence(text, 80), 'První úplná věta obsahuje podstatnou informaci.');
