@@ -3,8 +3,9 @@ import { HttpError } from '../lib/http-error.js';
 import { ConversationRepository } from '../repositories/conversation-repository.js';
 import { OpsRepository } from '../repositories/ops-repository.js';
 import type { SiteContext } from '../types/site-context.js';
-import { AIProviderRegistry } from './ai-provider-registry.js';
+import { AIProviderRegistry, COLOURBOND_PRODUCTS_PROFILE } from './ai-provider-registry.js';
 import { RetrievalService } from './retrieval-service.js';
+import { resolveProductQuestionContext } from './product-grounding.js';
 
 type ChatInput = {
   conversation_id?: string;
@@ -53,7 +54,14 @@ export class ChatService {
 
     const recentMessages = await this.conversationRepository.listRecentMessages(conversation.id, 8);
     const { profile, provider } = this.aiProviderRegistry.forSite(siteContext);
-    const retrievedChunks = await this.retrievalService.searchRelevantContent(siteContext.site.id, input.message, 5, profile);
+    const conversationHistory = recentMessages.map((message) => ({
+      role: (message.role === 'assistant' || message.role === 'system' || message.role === 'user' ? message.role : 'user') as 'assistant' | 'system' | 'user',
+      content: message.content,
+    }));
+    const retrievalQuery = profile === COLOURBOND_PRODUCTS_PROFILE
+      ? resolveProductQuestionContext(input.message, conversationHistory).question
+      : input.message;
+    const retrievedChunks = await this.retrievalService.searchRelevantContent(siteContext.site.id, retrievalQuery, 5, profile);
     const reply = await provider.generateReply({
       assistantName: input.assistant_name || siteContext.settings?.assistant_name || 'AI asistent',
       language: input.language || siteContext.site.language || 'sk',
@@ -61,10 +69,7 @@ export class ChatService {
       assistantProfile: profile,
       question: input.message,
       retrievedChunks,
-      conversationHistory: recentMessages.map((message) => ({
-        role: (message.role === 'assistant' || message.role === 'system' || message.role === 'user' ? message.role : 'user'),
-        content: message.content,
-      })),
+      conversationHistory,
     });
 
     await this.conversationRepository.createMessage(conversation.id, 'assistant', reply.text, {

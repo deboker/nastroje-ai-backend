@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { ProductCard } from '../src/services/ai-provider.js';
-import { partitionProducts, selectMentionedProducts, truncateAtSentence } from '../src/services/product-grounding.js';
+import { findUniqueProductReference, isProductSelectionRequest, partitionProducts, resolveProductQuestionContext, selectMentionedProducts, truncateAtSentence } from '../src/services/product-grounding.js';
 
 function product(title: string): ProductCard {
   return {
@@ -81,4 +81,145 @@ test('eligible products preserve retrieval order and rejected products never bec
 test('card text ends at a complete sentence when possible', () => {
   const text = 'První úplná věta obsahuje podstatnou informaci. Druhá věta je velmi dlouhá a neměla by být oříznuta uprostřed slova bez označení.';
   assert.equal(truncateAtSentence(text, 80), 'První úplná věta obsahuje podstatnou informaci.');
+});
+
+test('a new material does not inherit location or material from an older request', () => {
+  const context = resolveProductQuestionContext('Potřebuji lepidlo na dřevo.', [
+    { role: 'user', content: 'Potřebuji lepidlo na keramiku.' },
+    { role: 'assistant', content: 'Bude stůl v interiéru, nebo v exteriéru?' },
+    { role: 'user', content: 'Potřebuji lepidlo na dřevo.' },
+  ]);
+
+  assert.equal(context.question, 'Potřebuji lepidlo na dřevo.');
+  assert.equal(context.hasMaterial, true);
+  assert.equal(context.hasLocation, false);
+  assert.deepEqual(context.relevantHistory, []);
+});
+
+test('valid immediate clarification inherits only the previous user material', () => {
+  const context = resolveProductQuestionContext('Bude venku, na dešti a v mrazu.', [
+    { role: 'user', content: 'Potřebuji lepidlo na keramický stůl.' },
+    { role: 'assistant', content: 'Bude stůl v interiéru, nebo v exteriéru?' },
+    { role: 'user', content: 'Bude venku, na dešti a v mrazu.' },
+  ]);
+
+  assert.equal(context.question, 'Potřebuji lepidlo na keramický stůl.\nBude venku, na dešti a v mrazu.');
+  assert.deepEqual(context.relevantHistory.map((turn) => turn.role), ['user']);
+});
+
+test('valid Czech and English clarification variants inherit material', () => {
+  for (const [previous, assistant, current] of [
+    ['Potřebuji lepidlo na keramiku.', 'Bude stůl v interiéru, nebo v exteriéru?', 'Teď bude stůl venku.'],
+    ['Potřebuji lepidlo na keramiku.', 'Bude stůl v interiéru, nebo v exteriéru?', 'Jinak bude venku.'],
+    ['Potřebuji lepidlo na keramiku.', 'Bude stůl v interiéru, nebo v exteriéru?', 'Nyní bude vystaven dešti.'],
+    ['I need an adhesive for ceramic.', 'Will the table be indoors or outdoors?', 'It will be outdoors and exposed to rain.'],
+  ]) {
+    const context = resolveProductQuestionContext(current, [
+      { role: 'user', content: previous },
+      { role: 'assistant', content: assistant },
+      { role: 'user', content: current },
+    ]);
+    assert.equal(context.hasMaterial, true, current);
+    assert.equal(context.relevantHistory.length, 1, current);
+  }
+});
+
+test('invalid English assistant text does not activate material inheritance', () => {
+  const current = 'It will be outdoors.';
+  const context = resolveProductQuestionContext(current, [
+    { role: 'user', content: 'I need an adhesive for ceramic.' },
+    { role: 'assistant', content: 'Is this for inside or outside?' },
+    { role: 'user', content: current },
+  ]);
+  assert.equal(context.hasMaterial, false);
+  assert.deepEqual(context.relevantHistory, []);
+});
+
+test('location-only text does not inherit after a completed recommendation', () => {
+  const completedConversation = [
+    { role: 'user' as const, content: 'Potřebuji lepidlo na keramický stůl.' },
+    { role: 'assistant' as const, content: 'Doporučuji EVERCLEAR 510.' },
+  ];
+  const question = 'Bude nový projekt venku?';
+  const context = resolveProductQuestionContext(question, [...completedConversation, { role: 'user', content: question }]);
+  assert.equal(context.question, question);
+  assert.equal(context.hasMaterial, false);
+  assert.deepEqual(context.relevantHistory, []);
+});
+
+test('different or new request wording blocks inheritance even after a missing-location clarification', () => {
+  const clarificationSequence = [
+    { role: 'user' as const, content: 'Potřebuji lepidlo na keramický stůl.' },
+    { role: 'assistant' as const, content: 'Bude stůl v interiéru, nebo v exteriéru?' },
+  ];
+  for (const question of ['Potřebuji něco jiného venku.', 'Teď hledám jiný produkt venku.']) {
+    const context = resolveProductQuestionContext(question, [...clarificationSequence, { role: 'user', content: question }]);
+    assert.equal(context.question, question);
+    assert.equal(context.hasMaterial, false);
+    assert.deepEqual(context.relevantHistory, []);
+  }
+});
+
+test('material more than one user turn back is not inherited', () => {
+  const question = 'Bude venku a na dešti.';
+  const context = resolveProductQuestionContext(question, [
+    { role: 'user', content: 'Potřebuji lepidlo na keramiku.' },
+    { role: 'assistant', content: 'Bude použití v interiéru, nebo v exteriéru?' },
+    { role: 'user', content: 'Ještě si to rozmyslím.' },
+    { role: 'assistant', content: 'Dobře.' },
+    { role: 'user', content: question },
+  ]);
+
+  assert.equal(context.question, question);
+  assert.equal(context.hasMaterial, false);
+  assert.deepEqual(context.relevantHistory, []);
+});
+
+test('Czech and English indoor and outdoor variants are recognized without history', () => {
+  for (const question of [
+    'Keramika v interiéru.',
+    'Keramika uvnitř.',
+    'Keramika v exteriéru.',
+    'Keramika venku.',
+    'Venkovní keramika.',
+    'Ceramic indoors.',
+    'Ceramic indoor.',
+    'Ceramic outdoors.',
+    'Ceramic outdoor.',
+  ]) {
+    const context = resolveProductQuestionContext(question);
+    assert.equal(context.hasMaterial, true, question);
+    assert.equal(context.hasLocation, true, question);
+  }
+});
+
+test('venkovský style does not create outdoor context', () => {
+  const context = resolveProductQuestionContext('Keramický stůl ve venkovském stylu.');
+  assert.equal(context.hasMaterial, true);
+  assert.equal(context.hasLocation, false);
+});
+
+test('information need verbs alone are not product-selection intent', () => {
+  for (const question of [
+    'Potřebuji bezpečnostní list k produktu.',
+    'Potřebuji technický list.',
+    'Potřebuji informace o vytvrzení produktu.',
+    'I need curing information about this product.',
+    'I need the safety data sheet.',
+  ]) assert.equal(isProductSelectionRequest(question), false, question);
+  assert.equal(isProductSelectionRequest('Potřebuji lepidlo na keramický stůl.'), true);
+  assert.equal(isProductSelectionRequest('Which adhesive is suitable for ceramic outdoors?'), true);
+});
+
+test('unique product references accept full and conservative shortened titles only', () => {
+  const products = [
+    product('Colour Bond P+ 6min'),
+    product('AKENOVA ELASTIC 100'),
+    product('AKENOVA ROCKET 200'),
+  ];
+  assert.equal(findUniqueProductReference('Mohu použít Colour Bond P+ 6min?', products)?.title, 'Colour Bond P+ 6min');
+  assert.equal(findUniqueProductReference('Mohu použít Colour Bond P+?', products)?.title, 'Colour Bond P+ 6min');
+  assert.equal(findUniqueProductReference('Mohu použít AKENOVA?', products), undefined);
+  assert.equal(findUniqueProductReference('Potřebuji lepidlo.', products), undefined);
+  assert.equal(findUniqueProductReference('Je vhodný produkt?', products), undefined);
 });

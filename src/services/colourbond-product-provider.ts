@@ -1,6 +1,6 @@
 import { env } from '../lib/env.js';
 import type { AIProvider, AssistantLink, GenerateReplyInput, GenerateReplyResult, ProductCard } from './ai-provider.js';
-import { partitionProducts, selectMentionedProducts, truncateAtSentence, type GroundedProduct, type RejectedProduct } from './product-grounding.js';
+import { constraintsForQuestion, findUniqueProductReference, isGroqCatalogueInformationRequest, isProductSelectionRequest, MISSING_LOCATION_REPLIES, partitionProducts, resolveProductQuestionContext, selectMentionedProducts, truncateAtSentence, type GroundedProduct, type RejectedProduct } from './product-grounding.js';
 
 type GroqChatCompletionResponse = {
   choices?: Array<{ message?: { content?: string | Array<{ type?: string; text?: string }> } }>;
@@ -31,13 +31,38 @@ export class ColourbondProductProvider implements AIProvider {
       };
     }
 
+    const questionContext = resolveProductQuestionContext(input.question, input.conversationHistory);
+    const allowsGroqInformation = isGroqCatalogueInformationRequest(input.question);
+    const requiresSelectionDetails = !allowsGroqInformation && (
+      isProductSelectionRequest(input.question)
+      || questionContext.relevantHistory.length > 0
+      || questionContext.hasMaterial
+      || questionContext.hasLocation
+    );
+    if (requiresSelectionDetails && !questionContext.hasMaterial) return this.missingMaterialReply(english);
+    if (requiresSelectionDetails && !questionContext.hasLocation) return this.missingLocationReply(english);
+    if (!allowsGroqInformation && !requiresSelectionDetails) return this.productIntentClarificationReply(english);
+
     const candidates = this.collectProducts(input);
     if (!candidates.length) return this.noContextReply(english, links);
-    const partitioned = partitionProducts(candidates, input.question);
-    const products = partitioned.eligible.map((candidate) => candidate.product).slice(0, 3);
-    if (!products.length) return this.constraintReply(partitioned.rejected, input.question, english);
-    const sources = this.collectSources(products);
-    if (!env.GROQ_API_KEY) return this.buildDeterministicReply(products, sources, english, 'groq-unavailable', partitioned.rejected, input.question);
+    const partitioned = partitionProducts(candidates, questionContext.question);
+    const referencedProduct = findUniqueProductReference(
+      questionContext.question,
+      candidates.map((candidate) => candidate.product),
+    );
+    const directlyRejected = partitioned.rejected.find((candidate) => candidate.product.title === referencedProduct?.title);
+    if (directlyRejected) return this.constraintReply([directlyRejected], questionContext.question, english, directlyRejected.product.title);
+    const orderedEligible = referencedProduct
+      ? [...partitioned.eligible.filter((candidate) => candidate.product.title === referencedProduct.title), ...partitioned.eligible.filter((candidate) => candidate.product.title !== referencedProduct.title)]
+      : partitioned.eligible;
+    const selectedEligible = orderedEligible.slice(0, 3);
+    const products = selectedEligible.map((candidate) => candidate.product);
+    if (!products.length) return this.constraintReply(partitioned.rejected, questionContext.question, english);
+    if (requiresSelectionDetails) {
+      const safeProducts = this.withSafeSelectionReasons(selectedEligible, questionContext.question, english);
+      return this.buildDeterministicSelectionReply(safeProducts, this.collectSources(safeProducts), english);
+    }
+    if (!env.GROQ_API_KEY) return this.informationFallback(english, this.collectSources(products), 'groq-unavailable');
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
@@ -48,16 +73,25 @@ export class ColourbondProductProvider implements AIProvider {
         messages: [
           { role: 'system', content: this.systemPrompt(english) },
           { role: 'system', content: this.buildContext(partitioned.eligible.slice(0, 3), partitioned.rejected) },
+          ...questionContext.relevantHistory.map((turn) => ({
+            role: 'system',
+            content: `Relevant customer context from the immediately previous turn: ${turn.content}`,
+          })),
           { role: 'user', content: input.question },
         ],
       }),
     });
     const payload = (await response.json()) as GroqChatCompletionResponse;
-    if (!response.ok) return this.buildDeterministicReply(products, sources, english, 'groq-fallback', partitioned.rejected, input.question);
+    if (!response.ok) return this.informationFallback(english, this.collectSources(products), 'groq-fallback');
     const text = this.extractText(payload).trim();
-    const allRetrievedProducts = candidates.map((candidate) => candidate.product);
-    if (!text || !this.mentionsOnlyRetrievedProducts(text, allRetrievedProducts) || !this.followsProductOrder(text, products)) {
-      return this.buildDeterministicReply(products, sources, english, 'groq-guarded-fallback', partitioned.rejected, input.question);
+    const rejectedProducts = partitioned.rejected.map((candidate) => candidate.product);
+    if (
+      !text
+      || Boolean(findUniqueProductReference(text, rejectedProducts))
+      || !this.mentionsOnlyRetrievedProducts(text, products)
+      || !this.followsProductOrder(text, products)
+    ) {
+      return this.informationFallback(english, this.collectSources(products), 'groq-guarded-fallback');
     }
     const mentionedProducts = selectMentionedProducts(text, products);
     return { text, sources: this.collectSources(mentionedProducts), products: mentionedProducts, provider: `groq:${env.GROQ_MODEL}` };
@@ -117,32 +151,38 @@ export class ColourbondProductProvider implements AIProvider {
     return products.filter((product) => Boolean(product.url)).map((product) => ({ title: product.title, url: product.url }));
   }
 
-  private buildDeterministicReply(products: ProductCard[], sources: Array<{ title: string; url: string }>, english: boolean, suffix: string, rejected: RejectedProduct[] = [], question = ''): GenerateReplyResult {
-    const lines = products.map((product) => `- ${product.title}${product.reason ? ` – ${product.reason}` : ''}`);
-    const directlyRejected = rejected.find((candidate) => this.normalize(question).includes(this.normalize(candidate.product.title)));
-    const rejectionPrefix = directlyRejected
-      ? (english
-          ? `${directlyRejected.product.title} cannot be safely recommended for this use because the catalogue does not explicitly confirm ${this.describeConstraints(directlyRejected.reasons, true)}.\n\n`
-          : `${directlyRejected.product.title} nelze pro toto použití bezpečně doporučit, protože katalog výslovně nepotvrzuje ${this.describeConstraints(directlyRejected.reasons, false)}.\n\n`)
-      : '';
+  private buildDeterministicSelectionReply(products: ProductCard[], sources: Array<{ title: string; url: string }>, english: boolean): GenerateReplyResult {
+    const [mainProduct, ...alternatives] = products;
+    const describe = (product: ProductCard) => `${product.title}${product.reason ? ` – ${product.reason}` : ''}`;
+    const mainLine = mainProduct ? describe(mainProduct) : '';
+    const mainSentence = /[.!?]$/u.test(mainLine) ? mainLine : `${mainLine}.`;
+    const alternativeLines = alternatives.map((product) => `- ${describe(product)}`).join('\n');
     return {
       text: english
-        ? `${rejectionPrefix}Based on the available catalogue, consider these products in this order:\n${lines.join('\n')}\n\nIf you share the exact material and application, I can narrow the choice.`
-        : `${rejectionPrefix}Podle dostupného katalogu zvažte v tomto pořadí:\n${lines.join('\n')}\n\nKdyž upřesníte přesný materiál a způsob použití, výběr zúžím.`,
-      sources, products, provider: `groq:${env.GROQ_MODEL}:${suffix}`,
+        ? `Based on the available catalogue, the main suitable choice is ${mainSentence}${alternativeLines ? `\n\nSuitable alternatives:\n${alternativeLines}` : ''}`
+        : `Podle dostupného katalogu je hlavní vhodnou volbou ${mainSentence}${alternativeLines ? `\n\nVhodné alternativy:\n${alternativeLines}` : ''}`,
+      sources, products, provider: 'deterministic:grounded-selection',
     };
   }
 
-  private constraintReply(rejected: RejectedProduct[], question: string, english: boolean): GenerateReplyResult {
+  private withSafeSelectionReasons(products: GroundedProduct[], question: string, english: boolean): ProductCard[] {
+    const labels = constraintsForQuestion(question).map((constraint) => constraint.label);
+    const reason = english
+      ? `The catalogue explicitly confirms ${this.describeConstraints(labels, true)}.`
+      : `Katalog výslovně potvrzuje ${this.describeConstraints(labels, false)}.`;
+    return products.map((candidate) => ({ ...candidate.product, reason }));
+  }
+
+  private constraintReply(rejected: RejectedProduct[], question: string, english: boolean, explicitSubject?: string): GenerateReplyResult {
     const directlyAsked = rejected.find((candidate) => this.normalize(question).includes(this.normalize(candidate.product.title)));
-    const subject = directlyAsked?.product.title || (english ? 'the retrieved products' : 'nalezené produkty');
-    const missingReasons = directlyAsked?.reasons || [...new Set(rejected.flatMap((candidate) => candidate.reasons))];
+    const subject = explicitSubject || directlyAsked?.product.title || (english ? 'the retrieved products' : 'nalezené produkty');
+    const missingReasons = (explicitSubject ? rejected[0]?.reasons : directlyAsked?.reasons) || [...new Set(rejected.flatMap((candidate) => candidate.reasons))];
     const missing = this.describeConstraints(missingReasons, english);
     return {
       text: english
-        ? `Based on the available catalogue data, I cannot safely recommend ${subject} for this use because ${missing} is not explicitly confirmed. Please specify the exact material and application, or contact our support for verification.`
-        : `Podle dostupných katalogových údajů nemohu ${subject} pro toto použití bezpečně doporučit, protože není výslovně potvrzeno: ${missing}. Upřesněte přesný materiál a způsob použití, případně vhodnost ověřte u podpory.`,
-      sources: [], products: [], provider: `groq:${env.GROQ_MODEL}:constraint-filtered`,
+        ? `Based on the available catalogue data, I cannot safely recommend ${subject} for this use because ${missing} is not explicitly confirmed. Please contact our support for verification.`
+        : `Podle dostupných katalogových údajů nemohu ${subject} pro toto použití bezpečně doporučit, protože není výslovně potvrzeno: ${missing}. Vhodnost případně ověřte u podpory.`,
+      sources: [], products: [], provider: 'deterministic:constraint-filtered',
     };
   }
 
@@ -167,6 +207,38 @@ export class ColourbondProductProvider implements AIProvider {
         ? 'I do not have enough reliable catalogue information to recommend a specific product. Please email info@colourbond.cz or use the contact form.'
         : 'V dostupných podkladech nemám dost spolehlivých informací k doporučení konkrétního produktu. Napište na info@colourbond.cz nebo použijte kontaktní formulář.',
       sources: [], products: [], links, provider: `groq:${env.GROQ_MODEL}:grounded-no-context`,
+    };
+  }
+
+  private missingMaterialReply(english: boolean): GenerateReplyResult {
+    return {
+      text: english ? 'What material or materials will be bonded?' : 'Jaký materiál nebo materiály budete lepit?',
+      sources: [], products: [], provider: 'deterministic:missing-material',
+    };
+  }
+
+  private missingLocationReply(english: boolean): GenerateReplyResult {
+    return {
+      text: english ? MISSING_LOCATION_REPLIES.en : MISSING_LOCATION_REPLIES.cs,
+      sources: [], products: [], provider: 'deterministic:missing-location',
+    };
+  }
+
+  private productIntentClarificationReply(english: boolean): GenerateReplyResult {
+    return {
+      text: english
+        ? 'Would you like help selecting a product, or information about a specific product?'
+        : 'Chcete pomoci s výběrem produktu, nebo potřebujete informace o konkrétním produktu?',
+      sources: [], products: [], provider: 'deterministic:product-intent-clarification',
+    };
+  }
+
+  private informationFallback(english: boolean, sources: Array<{ title: string; url: string }>, suffix: string): GenerateReplyResult {
+    return {
+      text: english
+        ? 'I cannot provide reliable catalogue details right now. Please consult the listed product source or contact our support.'
+        : 'Spolehlivé katalogové informace teď nemohu poskytnout. Podívejte se prosím do uvedeného zdroje produktu nebo kontaktujte podporu.',
+      sources, products: [], provider: `groq:${env.GROQ_MODEL}:${suffix}`,
     };
   }
 
