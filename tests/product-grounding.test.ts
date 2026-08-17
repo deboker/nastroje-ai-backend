@@ -43,6 +43,27 @@ test('missing catalogue property is not treated as confirmed compatibility', () 
   assert.deepEqual(result.rejected[0]?.reasons, ['explicitly confirmed outdoor use', 'ceramic or gres']);
 });
 
+test('indoor requests require explicit indoor confirmation and preserve outdoor behavior', () => {
+  const indoor = { product: product('Indoor Wood'), catalogueText: 'Dřevo pro použití v interiéru. Indoor use.' };
+  const outdoorOnly = { product: product('Outdoor Wood'), catalogueText: 'Dřevo pouze pro exteriér. Outdoor-only.' };
+  const unspecified = { product: product('Unspecified Wood'), catalogueText: 'Silné lepidlo na dřevo.' };
+  const both = { product: product('Indoor Outdoor Wood'), catalogueText: 'Dřevo pro vnitřní i venkovní použití. Indoor and outdoor.' };
+
+  const indoorResult = partitionProducts([indoor, outdoorOnly, unspecified, both], 'Lepidlo na dřevo do interiéru.');
+  assert.deepEqual(indoorResult.eligible.map((candidate) => candidate.product.title), ['Indoor Wood', 'Indoor Outdoor Wood']);
+  assert.deepEqual(indoorResult.rejected.map((candidate) => candidate.product.title), ['Outdoor Wood', 'Unspecified Wood']);
+  assert.ok(indoorResult.rejected.every((candidate) => candidate.reasons.includes('explicitly confirmed indoor use')));
+
+  const outdoorResult = partitionProducts([indoor, outdoorOnly, unspecified, both], 'Lepidlo na dřevo do exteriéru.');
+  assert.deepEqual(outdoorResult.eligible.map((candidate) => candidate.product.title), ['Outdoor Wood', 'Indoor Outdoor Wood']);
+
+  const unrelatedIndoorWord = partitionProducts(
+    [{ product: product('Design Wood'), catalogueText: 'Dřevo s interiérovým designem obalu.' }],
+    'Lepidlo na dřevo do interiéru.',
+  );
+  assert.equal(unrelatedIndoorWord.eligible.length, 0);
+});
+
 test('cards include only products named in the answer and are limited to three', () => {
   const products = ['Product Alpha', 'Product Beta', 'Product Gamma', 'Product Delta'].map(product);
   assert.deepEqual(
@@ -86,7 +107,7 @@ test('card text ends at a complete sentence when possible', () => {
 test('a new material does not inherit location or material from an older request', () => {
   const context = resolveProductQuestionContext('Potřebuji lepidlo na dřevo.', [
     { role: 'user', content: 'Potřebuji lepidlo na keramiku.' },
-    { role: 'assistant', content: 'Bude stůl v interiéru, nebo v exteriéru?' },
+    { role: 'assistant', content: 'Bude použití v interiéru, nebo v exteriéru?' },
     { role: 'user', content: 'Potřebuji lepidlo na dřevo.' },
   ]);
 
@@ -99,7 +120,7 @@ test('a new material does not inherit location or material from an older request
 test('valid immediate clarification inherits only the previous user material', () => {
   const context = resolveProductQuestionContext('Bude venku, na dešti a v mrazu.', [
     { role: 'user', content: 'Potřebuji lepidlo na keramický stůl.' },
-    { role: 'assistant', content: 'Bude stůl v interiéru, nebo v exteriéru?' },
+    { role: 'assistant', content: 'Bude použití v interiéru, nebo v exteriéru?' },
     { role: 'user', content: 'Bude venku, na dešti a v mrazu.' },
   ]);
 
@@ -109,10 +130,10 @@ test('valid immediate clarification inherits only the previous user material', (
 
 test('valid Czech and English clarification variants inherit material', () => {
   for (const [previous, assistant, current] of [
-    ['Potřebuji lepidlo na keramiku.', 'Bude stůl v interiéru, nebo v exteriéru?', 'Teď bude stůl venku.'],
-    ['Potřebuji lepidlo na keramiku.', 'Bude stůl v interiéru, nebo v exteriéru?', 'Jinak bude venku.'],
-    ['Potřebuji lepidlo na keramiku.', 'Bude stůl v interiéru, nebo v exteriéru?', 'Nyní bude vystaven dešti.'],
-    ['I need an adhesive for ceramic.', 'Will the table be indoors or outdoors?', 'It will be outdoors and exposed to rain.'],
+    ['Potřebuji lepidlo na keramiku.', 'Bude použití v interiéru, nebo v exteriéru?', 'Teď bude stůl venku.'],
+    ['Potřebuji lepidlo na keramiku.', 'Bude použití v interiéru, nebo v exteriéru?', 'Jinak bude venku.'],
+    ['Potřebuji lepidlo na keramiku.', 'Bude použití v interiéru, nebo v exteriéru?', 'Nyní bude vystaven dešti.'],
+    ['I need an adhesive for ceramic.', 'Will it be used indoors or outdoors?', 'It will be outdoors and exposed to rain.'],
   ]) {
     const context = resolveProductQuestionContext(current, [
       { role: 'user', content: previous },
@@ -150,7 +171,7 @@ test('location-only text does not inherit after a completed recommendation', () 
 test('different or new request wording blocks inheritance even after a missing-location clarification', () => {
   const clarificationSequence = [
     { role: 'user' as const, content: 'Potřebuji lepidlo na keramický stůl.' },
-    { role: 'assistant' as const, content: 'Bude stůl v interiéru, nebo v exteriéru?' },
+    { role: 'assistant' as const, content: 'Bude použití v interiéru, nebo v exteriéru?' },
   ];
   for (const question of ['Potřebuji něco jiného venku.', 'Teď hledám jiný produkt venku.']) {
     const context = resolveProductQuestionContext(question, [...clarificationSequence, { role: 'user', content: question }]);
@@ -178,8 +199,15 @@ test('material more than one user turn back is not inherited', () => {
 test('Czech and English indoor and outdoor variants are recognized without history', () => {
   for (const question of [
     'Keramika v interiéru.',
+    'Keramika v interieru.',
+    'Keramika interier.',
+    'Keramika interieru.',
     'Keramika uvnitř.',
+    'Keramika uvnitr.',
     'Keramika v exteriéru.',
+    'Keramika v exterieru.',
+    'Keramika exterier.',
+    'Keramika exterieru.',
     'Keramika venku.',
     'Venkovní keramika.',
     'Ceramic indoors.',
@@ -191,6 +219,40 @@ test('Czech and English indoor and outdoor variants are recognized without histo
     assert.equal(context.hasMaterial, true, question);
     assert.equal(context.hasLocation, true, question);
   }
+});
+
+test('an unrecognized short location answer does not discard pending material context', () => {
+  const current = 'Nejsem si jistý.';
+  const context = resolveProductQuestionContext(current, [
+    { role: 'user', content: 'drevo' },
+    { role: 'assistant', content: 'Bude použití v interiéru, nebo v exteriéru?' },
+    { role: 'user', content: current },
+  ]);
+  assert.equal(context.hasMaterial, true);
+  assert.equal(context.hasLocation, false);
+  assert.match(context.question, /drevo/u);
+});
+
+test('a new explicit material replaces pending material in the clarification chain', () => {
+  const context = resolveProductQuestionContext('kov', [
+    { role: 'user', content: 'drevo' },
+    { role: 'assistant', content: 'Bude použití v interiéru, nebo v exteriéru?' },
+    { role: 'user', content: 'kov' },
+  ]);
+  assert.equal(context.question, 'kov');
+  assert.equal(context.hasMaterial, true);
+  assert.doesNotMatch(context.question, /drevo/u);
+});
+
+test('a recognized unrelated request clears the pending material chain', () => {
+  const context = resolveProductQuestionContext('Jaký je stav objednávky?', [
+    { role: 'user', content: 'drevo' },
+    { role: 'assistant', content: 'Bude použití v interiéru, nebo v exteriéru?' },
+    { role: 'user', content: 'Jaký je stav objednávky?' },
+  ]);
+  assert.equal(context.question, 'Jaký je stav objednávky?');
+  assert.equal(context.hasMaterial, false);
+  assert.deepEqual(context.relevantHistory, []);
 });
 
 test('venkovský style does not create outdoor context', () => {

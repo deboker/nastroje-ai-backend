@@ -52,8 +52,9 @@ export class ChatService {
       source_page_url: input.source_page_url || null,
     });
 
-    const recentMessages = await this.conversationRepository.listRecentMessages(conversation.id, 8);
     const { profile, provider } = this.aiProviderRegistry.forSite(siteContext);
+    const recentMessageLimit = profile === COLOURBOND_PRODUCTS_PROFILE ? MAX_CONVERSATION_MESSAGES : 8;
+    const recentMessages = await this.conversationRepository.listRecentMessages(conversation.id, recentMessageLimit);
     const conversationHistory = recentMessages.map((message) => ({
       role: (message.role === 'assistant' || message.role === 'system' || message.role === 'user' ? message.role : 'user') as 'assistant' | 'system' | 'user',
       content: message.content,

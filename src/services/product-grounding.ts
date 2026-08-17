@@ -38,8 +38,13 @@ export type ProductQuestionContext = {
 };
 
 export const MISSING_LOCATION_REPLIES = {
-  cs: 'Bude stůl v interiéru, nebo v exteriéru?',
-  en: 'Will the table be indoors or outdoors?',
+  cs: 'Bude použití v interiéru, nebo v exteriéru?',
+  en: 'Will it be used indoors or outdoors?',
+} as const;
+
+export const MISSING_USAGE_PRODUCT_REPLIES = {
+  cs: 'Který konkrétní produkt chcete použít? Napište jeho název.',
+  en: 'Which specific product would you like to use? Please enter its name.',
 } as const;
 
 export function normalizeGroundingText(value: string): string {
@@ -49,6 +54,13 @@ export function normalizeGroundingText(value: string): string {
 export function constraintsForQuestion(question: string): ProductConstraint[] {
   const normalized = normalizeGroundingText(question);
   const constraints: ProductConstraint[] = [];
+  const wantsIndoor = /\b(interier\w*|indoor\w*|inside|uvnitr\w*|vnitrni\w*)\b/u.test(normalized);
+  if (wantsIndoor) {
+    constraints.push({
+      label: 'explicitly confirmed indoor use',
+      matches: (text) => /\b(interier(?:u)?|indoors?|uvnitr|vnitrni pouziti|interior use)\b/u.test(text),
+    });
+  }
   const wantsOutdoor = /\b(venku|venkovn\w*|exterier\w*|outdoor\w*|outside|dest\w*|rain\w*|mraz\w*|frost\w*|prim\w* slunc\w*|direct sunlight)\b/u.test(normalized);
   if (wantsOutdoor) {
     constraints.push({
@@ -71,24 +83,19 @@ export function resolveProductQuestionContext(
   let relevantHistory: ConversationTurn[] = [];
   let resolvedQuestion = question;
 
-  if (isShortLocationClarification(question, currentHasMaterial, currentHasLocation)) {
+  if (isShortSelectionFollowUp(question, currentHasMaterial)) {
     const precedingTurns = [...conversationHistory];
     const lastTurn = precedingTurns.at(-1);
     if (lastTurn?.role === 'user' && normalizeGroundingText(lastTurn.content) === normalizeGroundingText(question)) {
       precedingTurns.pop();
     }
     const clarificationTurn = precedingTurns.at(-1);
-    const previousUserTurn = precedingTurns.at(-2);
-    if (
-      clarificationTurn?.role === 'assistant'
-      && isMissingLocationClarification(clarificationTurn.content)
-      && previousUserTurn?.role === 'user'
-      && isProductSelectionRequest(previousUserTurn.content)
-      && hasMaterialRequirement(previousUserTurn.content)
-      && !hasLocationRequirement(previousUserTurn.content)
-    ) {
-      relevantHistory = [previousUserTurn];
-      resolvedQuestion = `${previousUserTurn.content}\n${question}`;
+    if (clarificationTurn?.role === 'assistant' && isMissingLocationClarification(clarificationTurn.content)) {
+      const previousMaterialTurn = findPendingMaterialTurn(precedingTurns.slice(0, -1));
+      if (previousMaterialTurn) {
+        relevantHistory = [previousMaterialTurn];
+        resolvedQuestion = `${previousMaterialTurn.content}\n${question}`;
+      }
     }
   }
 
@@ -114,19 +121,60 @@ export function isProductSelectionRequest(question: string): boolean {
 }
 
 export function isGroqCatalogueInformationRequest(question: string): boolean {
-  const normalized = normalizeGroundingText(question);
-  return /\b(jak se pouziva|jak pouzit|jak aplikovat|zpusob pouziti|navod k pouziti|bezpecnostn\w* list\w*|technick\w* list\w*|technick\w* udaj\w*|technick\w* informac\w*|doba vytvr\w*|informac\w* o (?:dobe )?vytvr\w*|doba zpracovani|how (?:do i|to) (?:use|apply)|usage instructions?|safety data sheet|technical data sheet|technical information|curing information|curing time|handling information|processing time)\b/u.test(normalized);
+  return isProductUsageRequest(question) || isProductTechnicalInformationRequest(question);
 }
 
-function isShortLocationClarification(question: string, hasMaterial: boolean, hasLocation: boolean): boolean {
+export function isProductUsageRequest(question: string): boolean {
+  const normalized = normalizeGroundingText(question);
+  return /\b(jak produkt pouzit|jak se pouziva|jak pouzit|jak aplikovat|zpusob pouziti|navod k pouziti|how (?:do i|to) (?:use|apply)|usage instructions?|how is .* (?:used|applied))\b/u.test(normalized);
+}
+
+export function isProductTechnicalInformationRequest(question: string): boolean {
+  const normalized = normalizeGroundingText(question);
+  return /\b(bezpecnost\w*|bezpecnostn\w* list\w*|technick\w* list\w*|technick\w* udaj\w*|technick\w* informac\w*|vytvr\w*|doba zpracovani|zpracovatelsk\w* cas\w*|manipulac\w*|michan\w*|pomer\w* michan\w*|aplikacn\w* teplot\w*|certifik\w*|chemick\w* odolnost\w*|styk\w* s potravin\w*|safety|safety data sheet|technical data sheet|technical information|curing|processing time|working time|handling|mixing|mixing ratio|application temperature|certification|food contact|chemical resistance)\b/u.test(normalized);
+}
+
+export function followsUsageProductClarification(conversationHistory: ConversationTurn[] = []): boolean {
+  const precedingTurns = [...conversationHistory];
+  const lastTurn = precedingTurns.at(-1);
+  if (lastTurn?.role === 'user') precedingTurns.pop();
+  const assistantTurn = precedingTurns.at(-1);
+  return assistantTurn?.role === 'assistant'
+    && Object.values(MISSING_USAGE_PRODUCT_REPLIES).some((reply) => normalizeGroundingText(reply) === normalizeGroundingText(assistantTurn.content));
+}
+
+function isShortSelectionFollowUp(question: string, hasMaterial: boolean): boolean {
   const normalized = normalizeGroundingText(question);
   const wordCount = normalized ? normalized.split(' ').length : 0;
   return !hasMaterial
-    && hasLocation
     && wordCount <= 18
     && !isProductSelectionRequest(question)
+    && !isConversationBoundaryRequest(question)
     && !/\b(colour bond|color bond|everclear|akenova|akepox|platinum|cistic|cleaner|produkt\w*|product\w*)\b/u.test(normalized)
     && !/\b(neco jineho|jiny produkt|jine lepidlo|odlisny produkt|novy produkt|novy pozadavek|hledam (?:jiny|novy) produkt|something else|different product|another product|new product|new request|looking for (?:a )?(?:different|new) product)\b/u.test(normalized);
+}
+
+function isConversationBoundaryRequest(question: string): boolean {
+  const normalized = normalizeGroundingText(question);
+  return /\b(kontakt\w*|email\w*|telefon\w*|podpor\w*|reklamac\w*|vrac\w*|stiznost|objednav\w*|doprava|doruc\w*|zasilk\w*|jak produkt pouzit|jak se pouziva|bezpecnost\w*|technick\w* list\w*|vytvr\w*|contact\w*|phone\w*|support\w*|complaint\w*|return\w*|refund\w*|order\w*|delivery|shipping|how (?:do i|to) (?:use|apply)|safety|technical data sheet|curing)\b/u.test(normalized);
+}
+
+function findPendingMaterialTurn(turns: ConversationTurn[]): ConversationTurn | undefined {
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index];
+    if (turn?.role === 'assistant') {
+      if (!isMissingLocationClarification(turn.content)) return undefined;
+      continue;
+    }
+    if (turn?.role !== 'user') continue;
+    if (hasMaterialRequirement(turn.content) && !hasLocationRequirement(turn.content)) return turn;
+    if (isExplicitNewProductRequest(turn.content) || hasLocationRequirement(turn.content)) return undefined;
+  }
+  return undefined;
+}
+
+function isExplicitNewProductRequest(question: string): boolean {
+  return /\b(neco jineho|jiny produkt|jine lepidlo|odlisny produkt|novy produkt|novy pozadavek|hledam (?:jiny|novy) produkt|something else|different product|another product|new product|new request|looking for (?:a )?(?:different|new) product)\b/u.test(normalizeGroundingText(question));
 }
 
 function isMissingLocationClarification(content: string): boolean {
