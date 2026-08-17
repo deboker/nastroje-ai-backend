@@ -5,7 +5,7 @@ import { OpsRepository } from '../repositories/ops-repository.js';
 import type { SiteContext } from '../types/site-context.js';
 import { AIProviderRegistry, COLOURBOND_PRODUCTS_PROFILE } from './ai-provider-registry.js';
 import { RetrievalService } from './retrieval-service.js';
-import { resolveProductQuestionContext } from './product-grounding.js';
+import { resolveContextualQuery } from './product-grounding.js';
 
 type ChatInput = {
   conversation_id?: string;
@@ -52,23 +52,22 @@ export class ChatService {
       source_page_url: input.source_page_url || null,
     });
 
+    const recentMessages = await this.conversationRepository.listRecentMessages(conversation.id, 8);
     const { profile, provider } = this.aiProviderRegistry.forSite(siteContext);
-    const recentMessageLimit = profile === COLOURBOND_PRODUCTS_PROFILE ? MAX_CONVERSATION_MESSAGES : 8;
-    const recentMessages = await this.conversationRepository.listRecentMessages(conversation.id, recentMessageLimit);
     const conversationHistory = recentMessages.map((message) => ({
       role: (message.role === 'assistant' || message.role === 'system' || message.role === 'user' ? message.role : 'user') as 'assistant' | 'system' | 'user',
       content: message.content,
     }));
-    const retrievalQuery = profile === COLOURBOND_PRODUCTS_PROFILE
-      ? resolveProductQuestionContext(input.message, conversationHistory).question
+    const question = profile === COLOURBOND_PRODUCTS_PROFILE
+      ? resolveContextualQuery(input.message, conversationHistory)
       : input.message;
-    const retrievedChunks = await this.retrievalService.searchRelevantContent(siteContext.site.id, retrievalQuery, 5, profile);
+    const retrievedChunks = await this.retrievalService.searchRelevantContent(siteContext.site.id, question, 5, profile);
     const reply = await provider.generateReply({
       assistantName: input.assistant_name || siteContext.settings?.assistant_name || 'AI asistent',
       language: input.language || siteContext.site.language || 'sk',
       tone: input.tone || siteContext.settings?.tone || 'professional',
       assistantProfile: profile,
-      question: input.message,
+      question,
       retrievedChunks,
       conversationHistory,
     });

@@ -14,6 +14,11 @@ export type RejectedProduct = GroundedProduct & {
   reasons: string[];
 };
 
+type ConversationTurn = {
+  role: 'system' | 'assistant' | 'user';
+  content: string;
+};
+
 const MATERIAL_CONSTRAINTS: Array<{ question: RegExp; constraint: ProductConstraint }> = [
   { question: /\b(keram\w*|gres\w*|ceramic\w*|porcelain\w*)\b/u, constraint: { label: 'ceramic or gres', matches: (text) => /\b(keram\w*|gres\w*|ceramic\w*|porcelain\w*)\b/u.test(text) } },
   { question: /\b(prirodn\w* kamen\w*|natural stone)\b/u, constraint: { label: 'natural stone', matches: (text) => /\b(prirodn\w* kamen\w*|natural stone)\b/u.test(text) } },
@@ -24,23 +29,6 @@ const MATERIAL_CONSTRAINTS: Array<{ question: RegExp; constraint: ProductConstra
   { question: /\b(drev\w*|wood\w*)\b/u, constraint: { label: 'wood', matches: (text) => /\b(drev\w*|wood\w*)\b/u.test(text) } },
   { question: /\b(kov\w*|metal\w*)\b/u, constraint: { label: 'metal', matches: (text) => /\b(kov\w*|metal\w*)\b/u.test(text) } },
 ];
-
-type ConversationTurn = {
-  role: 'system' | 'assistant' | 'user';
-  content: string;
-};
-
-export type ProductQuestionContext = {
-  question: string;
-  relevantHistory: ConversationTurn[];
-  hasMaterial: boolean;
-  hasLocation: boolean;
-};
-
-export const MISSING_LOCATION_REPLIES = {
-  cs: 'Bude použití v interiéru, nebo v exteriéru?',
-  en: 'Will it be used indoors or outdoors?',
-} as const;
 
 export const MISSING_USAGE_PRODUCT_REPLIES = {
   cs: 'Který konkrétní produkt chcete použít? Napište jeho název.',
@@ -54,18 +42,11 @@ export function normalizeGroundingText(value: string): string {
 export function constraintsForQuestion(question: string): ProductConstraint[] {
   const normalized = normalizeGroundingText(question);
   const constraints: ProductConstraint[] = [];
-  const wantsIndoor = /\b(interier\w*|indoor\w*|inside|uvnitr\w*|vnitrni\w*)\b/u.test(normalized);
-  if (wantsIndoor) {
-    constraints.push({
-      label: 'explicitly confirmed indoor use',
-      matches: (text) => /\b(interier(?:u)?|indoors?|uvnitr|vnitrni pouziti|interior use)\b/u.test(text),
-    });
-  }
-  const wantsOutdoor = /\b(venku|venkovn\w*|exterier\w*|outdoor\w*|outside|dest\w*|rain\w*|mraz\w*|frost\w*|prim\w* slunc\w*|direct sunlight)\b/u.test(normalized);
+  const wantsOutdoor = /\b(venkov\w*|exterier\w*|outdoor\w*|outside|dest\w*|rain\w*|mraz\w*|frost\w*|prim\w* slunc\w*|direct sunlight)\b/u.test(normalized);
   if (wantsOutdoor) {
     constraints.push({
       label: 'explicitly confirmed outdoor use',
-      matches: (text) => /\b(exterier\w*|venku|venkovn\w*|outdoor\w*|mraz\w*|frost\w*|povetrnost\w* vliv\w*|weather\w* resist\w*)\b/u.test(text),
+      matches: (text) => /\b(exterier\w*|venkov\w*|outdoor\w*|mraz\w*|frost\w*|povetrnost\w* vliv\w*|weather\w* resist\w*)\b/u.test(text),
     });
   }
   for (const candidate of MATERIAL_CONSTRAINTS) {
@@ -74,59 +55,74 @@ export function constraintsForQuestion(question: string): ProductConstraint[] {
   return constraints;
 }
 
-export function resolveProductQuestionContext(
-  question: string,
-  conversationHistory: ConversationTurn[] = [],
-): ProductQuestionContext {
-  const currentHasMaterial = hasMaterialRequirement(question);
-  const currentHasLocation = hasLocationRequirement(question);
-  let relevantHistory: ConversationTurn[] = [];
-  let resolvedQuestion = question;
-
-  if (isShortSelectionFollowUp(question, currentHasMaterial)) {
-    const precedingTurns = [...conversationHistory];
-    const lastTurn = precedingTurns.at(-1);
-    if (lastTurn?.role === 'user' && normalizeGroundingText(lastTurn.content) === normalizeGroundingText(question)) {
-      precedingTurns.pop();
-    }
-    const clarificationTurn = precedingTurns.at(-1);
-    if (clarificationTurn?.role === 'assistant' && isMissingLocationClarification(clarificationTurn.content)) {
-      const previousMaterialTurn = findPendingMaterialTurn(precedingTurns.slice(0, -1));
-      if (previousMaterialTurn) {
-        relevantHistory = [previousMaterialTurn];
-        resolvedQuestion = `${previousMaterialTurn.content}\n${question}`;
-      }
-    }
+export function partitionProducts(products: GroundedProduct[], question: string): { eligible: GroundedProduct[]; rejected: RejectedProduct[] } {
+  const constraints = constraintsForQuestion(question);
+  if (!constraints.length) return { eligible: products, rejected: [] };
+  const eligible: GroundedProduct[] = [];
+  const rejected: RejectedProduct[] = [];
+  for (const candidate of products) {
+    const normalizedCatalogue = normalizeGroundingText(candidate.catalogueText);
+    const reasons = constraints.filter((constraint) => !constraint.matches(normalizedCatalogue)).map((constraint) => constraint.label);
+    if (reasons.length) rejected.push({ ...candidate, reasons });
+    else eligible.push(candidate);
   }
-
-  return {
-    question: resolvedQuestion,
-    relevantHistory,
-    hasMaterial: hasMaterialRequirement(resolvedQuestion),
-    hasLocation: hasLocationRequirement(resolvedQuestion),
-  };
+  return { eligible, rejected };
 }
 
-export function isProductSelectionRequest(question: string): boolean {
-  const normalized = normalizeGroundingText(question);
-  const asksForInformation = isGroqCatalogueInformationRequest(question);
-  const explicitSelection = /\b(vybrat|vyber\w*|doporuc\w*|vhodn\w*|kompatib\w*|co pouzit|mohu pouzit|lze pouzit|jake lepidlo|recommend\w*|suitab\w*|compatib\w*|can i use|choose|which adhesive|which product)\b/u.test(normalized);
-  if (asksForInformation && !explicitSelection) {
-    return false;
-  }
-  if (explicitSelection) return true;
-  const hasNeedVerb = /\b(potrebuji|potreboval\w*|hledam|need|looking for)\b/u.test(normalized);
-  const hasProductCategory = /\b(lepidl\w*|tmel\w*|cistic\w*|produkt\w*|adhesive\w*|glue\w*|sealant\w*|cleaner\w*|product\w*)\b/u.test(normalized);
-  return hasNeedVerb && hasProductCategory;
+export function truncateAtSentence(value: string, maxLength = 320): string {
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= maxLength) return normalized;
+  const candidate = normalized.slice(0, maxLength + 1);
+  const sentenceEnds = [...candidate.matchAll(/[.!?](?=\s|$)/g)];
+  const lastSentenceEnd = sentenceEnds.at(-1)?.index;
+  if (typeof lastSentenceEnd === 'number' && lastSentenceEnd >= Math.min(80, maxLength / 2)) return candidate.slice(0, lastSentenceEnd + 1).trim();
+  const lastSpace = candidate.lastIndexOf(' ', maxLength);
+  return `${candidate.slice(0, lastSpace > 0 ? lastSpace : maxLength).trim()}…`;
 }
 
-export function isGroqCatalogueInformationRequest(question: string): boolean {
-  return isProductUsageRequest(question) || isProductTechnicalInformationRequest(question);
+export function selectMentionedProducts(text: string, products: ProductCard[], limit = 3): ProductCard[] {
+  const normalizedText = normalizeGroundingText(text);
+  return products.filter((product) => {
+    const title = normalizeGroundingText(product.title);
+    if (!title) return false;
+    const escapedTitle = title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(?:^|\\s)${escapedTitle}(?=\\s|$)`, 'u').test(normalizedText);
+  }).slice(0, limit);
+}
+
+const LOCATION_OR_EXPOSURE_PATTERN = /\b(interier\w*|indoor\w*|inside|uvnitr\w*|vnitrni\w*|venku|venkovn\w*|exterier\w*|outdoor\w*|outside|dest\w*|rain\w*|mraz\w*|frost\w*|prim\w* slunc\w*|direct sunlight)\b/u;
+
+const NEW_TOPIC_PATTERN = /\b(neco jineho|jiny produkt|jine lepidlo|odlisny produkt|novy produkt|novy pozadavek|hledam (?:jiny|novy) produkt|different product|another product|new product|new request|looking for (?:a )?(?:different|new) product|now i need)\b/u;
+
+// Narrow, single-turn context helper. If the current message adds location or
+// exposure but no new material, and the immediately preceding user turn had a
+// recognized material, produce a combined query for retrieval and grounding.
+// The helper never issues clarifying prompts, never inspects assistant state,
+// and never inherits across an explicit new-topic phrase.
+export function resolveContextualQuery(question: string, conversationHistory: ConversationTurn[] = []): string {
+  const normalizedCurrent = normalizeGroundingText(question);
+  if (hasRecognizedMaterial(normalizedCurrent)) return question;
+  if (!LOCATION_OR_EXPOSURE_PATTERN.test(normalizedCurrent)) return question;
+  if (NEW_TOPIC_PATTERN.test(normalizedCurrent)) return question;
+
+  for (let index = conversationHistory.length - 1; index >= 0; index -= 1) {
+    const turn = conversationHistory[index];
+    if (turn.role !== 'user') continue;
+    const normalizedTurn = normalizeGroundingText(turn.content);
+    if (normalizedTurn === normalizedCurrent) continue;
+    if (hasRecognizedMaterial(normalizedTurn)) return `${turn.content}\n${question}`;
+    return question;
+  }
+  return question;
+}
+
+function hasRecognizedMaterial(normalized: string): boolean {
+  return MATERIAL_CONSTRAINTS.some((candidate) => candidate.question.test(normalized));
 }
 
 export function isProductUsageRequest(question: string): boolean {
   const normalized = normalizeGroundingText(question);
-  return /\b(jak produkt pouzit|jak se pouziva|jak pouzit|jak aplikovat|zpusob pouziti|navod k pouziti|how (?:do i|to) (?:use|apply)|usage instructions?|how is .* (?:used|applied))\b/u.test(normalized);
+  return /\b(jak produkt pouzit|jak se pouziva|jak pouzit|jak aplikovat|zpusob pouziti|navod k pouziti|poradit s pouzitim|rada s pouzitim|jak spravne aplikovat|how (?:do i|to) (?:use|apply)|usage instructions?|how is .* (?:used|applied)|advice on how to use|help using)\b/u.test(normalized);
 }
 
 export function isProductTechnicalInformationRequest(question: string): boolean {
@@ -141,56 +137,6 @@ export function followsUsageProductClarification(conversationHistory: Conversati
   const assistantTurn = precedingTurns.at(-1);
   return assistantTurn?.role === 'assistant'
     && Object.values(MISSING_USAGE_PRODUCT_REPLIES).some((reply) => normalizeGroundingText(reply) === normalizeGroundingText(assistantTurn.content));
-}
-
-function isShortSelectionFollowUp(question: string, hasMaterial: boolean): boolean {
-  const normalized = normalizeGroundingText(question);
-  const wordCount = normalized ? normalized.split(' ').length : 0;
-  return !hasMaterial
-    && wordCount <= 18
-    && !isProductSelectionRequest(question)
-    && !isConversationBoundaryRequest(question)
-    && !/\b(colour bond|color bond|everclear|akenova|akepox|platinum|cistic|cleaner|produkt\w*|product\w*)\b/u.test(normalized)
-    && !/\b(neco jineho|jiny produkt|jine lepidlo|odlisny produkt|novy produkt|novy pozadavek|hledam (?:jiny|novy) produkt|something else|different product|another product|new product|new request|looking for (?:a )?(?:different|new) product)\b/u.test(normalized);
-}
-
-function isConversationBoundaryRequest(question: string): boolean {
-  const normalized = normalizeGroundingText(question);
-  return /\b(kontakt\w*|email\w*|telefon\w*|podpor\w*|reklamac\w*|vrac\w*|stiznost|objednav\w*|doprava|doruc\w*|zasilk\w*|jak produkt pouzit|jak se pouziva|bezpecnost\w*|technick\w* list\w*|vytvr\w*|contact\w*|phone\w*|support\w*|complaint\w*|return\w*|refund\w*|order\w*|delivery|shipping|how (?:do i|to) (?:use|apply)|safety|technical data sheet|curing)\b/u.test(normalized);
-}
-
-function findPendingMaterialTurn(turns: ConversationTurn[]): ConversationTurn | undefined {
-  for (let index = turns.length - 1; index >= 0; index -= 1) {
-    const turn = turns[index];
-    if (turn?.role === 'assistant') {
-      if (!isMissingLocationClarification(turn.content)) return undefined;
-      continue;
-    }
-    if (turn?.role !== 'user') continue;
-    if (hasMaterialRequirement(turn.content) && !hasLocationRequirement(turn.content)) return turn;
-    if (isExplicitNewProductRequest(turn.content) || hasLocationRequirement(turn.content)) return undefined;
-  }
-  return undefined;
-}
-
-function isExplicitNewProductRequest(question: string): boolean {
-  return /\b(neco jineho|jiny produkt|jine lepidlo|odlisny produkt|novy produkt|novy pozadavek|hledam (?:jiny|novy) produkt|something else|different product|another product|new product|new request|looking for (?:a )?(?:different|new) product)\b/u.test(normalizeGroundingText(question));
-}
-
-function isMissingLocationClarification(content: string): boolean {
-  const normalized = normalizeGroundingText(content);
-  return Object.values(MISSING_LOCATION_REPLIES)
-    .some((reply) => normalizeGroundingText(reply) === normalized);
-}
-
-function hasMaterialRequirement(question: string): boolean {
-  const normalized = normalizeGroundingText(question);
-  return MATERIAL_CONSTRAINTS.some((candidate) => candidate.question.test(normalized));
-}
-
-function hasLocationRequirement(question: string): boolean {
-  const normalized = normalizeGroundingText(question);
-  return /\b(interier\w*|indoor\w*|inside|uvnitr\w*|vnitrni\w*|venku|venkovn\w*|exterier\w*|outdoor\w*|outside|dest\w*|rain\w*|mraz\w*|frost\w*|prim\w* slunc\w*|direct sunlight)\b/u.test(normalized);
 }
 
 const GENERIC_PRODUCT_NAME_TOKENS = new Set([
@@ -229,39 +175,4 @@ function containsProductAlias(value: string, alias: string): boolean {
   if (!alias) return false;
   const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(`(?:^|\\s)${escaped}(?=\\s|$)`, 'u').test(value);
-}
-
-export function partitionProducts(products: GroundedProduct[], question: string): { eligible: GroundedProduct[]; rejected: RejectedProduct[] } {
-  const constraints = constraintsForQuestion(question);
-  if (!constraints.length) return { eligible: products, rejected: [] };
-  const eligible: GroundedProduct[] = [];
-  const rejected: RejectedProduct[] = [];
-  for (const candidate of products) {
-    const normalizedCatalogue = normalizeGroundingText(candidate.catalogueText);
-    const reasons = constraints.filter((constraint) => !constraint.matches(normalizedCatalogue)).map((constraint) => constraint.label);
-    if (reasons.length) rejected.push({ ...candidate, reasons });
-    else eligible.push(candidate);
-  }
-  return { eligible, rejected };
-}
-
-export function truncateAtSentence(value: string, maxLength = 320): string {
-  const normalized = value.replace(/\s+/g, ' ').trim();
-  if (normalized.length <= maxLength) return normalized;
-  const candidate = normalized.slice(0, maxLength + 1);
-  const sentenceEnds = [...candidate.matchAll(/[.!?](?=\s|$)/g)];
-  const lastSentenceEnd = sentenceEnds.at(-1)?.index;
-  if (typeof lastSentenceEnd === 'number' && lastSentenceEnd >= Math.min(80, maxLength / 2)) return candidate.slice(0, lastSentenceEnd + 1).trim();
-  const lastSpace = candidate.lastIndexOf(' ', maxLength);
-  return `${candidate.slice(0, lastSpace > 0 ? lastSpace : maxLength).trim()}…`;
-}
-
-export function selectMentionedProducts(text: string, products: ProductCard[], limit = 3): ProductCard[] {
-  const normalizedText = normalizeGroundingText(text);
-  return products.filter((product) => {
-    const title = normalizeGroundingText(product.title);
-    if (!title) return false;
-    const escapedTitle = title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp(`(?:^|\\s)${escapedTitle}(?=\\s|$)`, 'u').test(normalizedText);
-  }).slice(0, limit);
 }
