@@ -23,8 +23,8 @@ export class ColourbondProductProvider implements AIProvider {
     const english = this.isEnglish(input.language);
     const links = this.supportLinks(english);
 
+    if (this.isComplaintOrReturn(input.question)) return this.returnsReply(english);
     if (this.isContactOrHumanSupport(input.question)) return this.contactReply(english, links, 'contact');
-    if (this.isComplaintOrReturn(input.question)) return this.contactReply(english, links, 'returns');
     if (this.isOrderQuestion(input.question)) {
       return {
         text: english
@@ -236,6 +236,26 @@ export class ColourbondProductProvider implements AIProvider {
         ? 'Telephone support is currently unavailable. Please email us at info@colourbond.cz or use the contact form.'
         : 'Telefonická podpora momentálně není k dispozici. Napište nám na info@colourbond.cz nebo použijte kontaktní formulář.',
       sources: [], products: [], links, provider: `groq:${env.GROQ_MODEL}:grounded-${suffix}`,
+    };
+  }
+
+  private returnsReply(english: boolean): GenerateReplyResult {
+    return {
+      text: english
+        ? 'You can find detailed information about complaints and returns on the linked page. If you wish to withdraw from a distance contract, you can complete the online form within 14 days of receiving the goods.'
+        : 'Podrobné informace o reklamacích a vrácení zboží najdete na uvedené stránce. Pokud chcete odstoupit od smlouvy uzavřené na dálku, můžete do 14 dnů od převzetí zboží vyplnit online formulář.',
+      sources: [], products: [],
+      links: [
+        {
+          label: english ? 'Complaints and returns information' : 'Informace o reklamacích a vrácení',
+          url: english ? '/en/content/9-complaints-and-returns' : '/content/9-reklamace-a-vraceni-zbozi',
+        },
+        {
+          label: english ? 'Withdrawal from contract form' : 'Formulář pro odstoupení od smlouvy',
+          url: english ? '/en/module/abcodstupenie/form' : '/cz/module/abcodstupenie/form',
+        },
+      ],
+      provider: `groq:${env.GROQ_MODEL}:grounded-returns`,
     };
   }
 

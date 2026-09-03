@@ -230,18 +230,28 @@ test('a directly asked rejected product produces a deterministic explanation and
 });
 
 // --- Return-related wording ("vrátit zboží", "vratit") must route to the
-// complaint/return contact reply, not fall through to noContextReply.
-test('return-related wording is routed to the complaint/return contact reply', async () => {
+// complaint/return guidance, not fall through to noContextReply.
+test('return-related wording is routed to the complaint and return guidance', async () => {
   const provider = new ColourbondProductProvider();
-  for (const question of [
-    'Chci vrátit zboží.',
-    'Rád bych vratil zboží.',
-    'How do I return this item?',
-    'I want a refund.',
+  for (const [question, language] of [
+    ['Chci vrátit zboží.', 'cs'],
+    ['Rád bych vratil zboží.', 'cs'],
+    ['Potřebuji kontakt kvůli reklamaci.', 'cs'],
+    ['How do I return this item?', 'en'],
+    ['I want a refund.', 'en'],
   ]) {
-    const reply = await provider.generateReply(input({ question, retrievedChunks: [] }));
+    const reply = await provider.generateReply(input({ question, language, retrievedChunks: [] }));
     assert.match(reply.provider, /:grounded-returns$/, question);
-    assert.match(reply.text, /Napište nám na info@colourbond\.cz|Please email us at info@colourbond\.cz/u, question);
+    assert.match(reply.text, /podrobné informace|detailed information/iu, question);
+    assert.deepEqual(reply.links, language === 'en'
+      ? [
+          { label: 'Complaints and returns information', url: '/en/content/9-complaints-and-returns' },
+          { label: 'Withdrawal from contract form', url: '/en/module/abcodstupenie/form' },
+        ]
+      : [
+          { label: 'Informace o reklamacích a vrácení', url: '/content/9-reklamace-a-vraceni-zbozi' },
+          { label: 'Formulář pro odstoupení od smlouvy', url: '/cz/module/abcodstupenie/form' },
+        ]);
   }
 });
 

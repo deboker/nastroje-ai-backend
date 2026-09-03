@@ -16,13 +16,16 @@
       slowLoading: "První odpověď může chvíli trvat. Děkujeme za trpělivost…",
       emptyReply: "Omlouvám se, nepodařilo se mi načíst odpověď.", productLink: "Zobrazit produkt",
       contactMessage: "Telefonická podpora momentálně není k dispozici. Napište nám na info@colourbond.cz nebo použijte kontaktní formulář.",
+      returnsMessage: "Podrobné informace o reklamacích a vrácení zboží najdete na uvedené stránce. Pokud chcete odstoupit od smlouvy uzavřené na dálku, můžete do 14 dnů od převzetí zboží vyplnit online formulář.",
+      returnsInfo: "Informace o reklamacích a vrácení", withdrawalForm: "Formulář pro odstoupení od smlouvy",
+      returnsUrl: "/content/9-reklamace-a-vraceni-zbozi", withdrawalUrl: "/cz/module/abcodstupenie/form",
       email: "Napsat na info@colourbond.cz", contactForm: "Otevřít kontaktní formulář", helpfulContact: "Kontaktní formulář", videos: "Aplikační videa",
       contactUrl: "/kontaktujte-nas", videosUrl: "/content/6-videa",
       actions: [
         ["Vybrat vhodný produkt", "Pomozte mi vybrat vhodný produkt COLOUR BOND."],
         ["Jak produkt použít", "Potřebuji poradit s použitím produktu."],
         ["Objednávka a doprava", "Mám dotaz k objednávce nebo dopravě."],
-        ["Reklamace a vrácení", "Potřebuji informace o reklamaci nebo vrácení zboží."],
+        ["Reklamace a vrácení", "Potřebuji informace o reklamaci nebo vrácení zboží.", "returns"],
         ["Napsat zprávu", null]
       ]
     },
@@ -37,13 +40,16 @@
       slowLoading: "The first response may take a moment. Thank you for your patience…",
       emptyReply: "Sorry, I could not load a response.", productLink: "View product",
       contactMessage: "Telephone support is currently unavailable. Please email us at info@colourbond.cz or use the contact form.",
+      returnsMessage: "You can find detailed information about complaints and returns on the linked page. If you wish to withdraw from a distance contract, you can complete the online form within 14 days of receiving the goods.",
+      returnsInfo: "Complaints and returns information", withdrawalForm: "Withdrawal from contract form",
+      returnsUrl: "/en/content/9-complaints-and-returns", withdrawalUrl: "/en/module/abcodstupenie/form",
       email: "Email info@colourbond.cz", contactForm: "Open contact form", helpfulContact: "Contact form", videos: "Application videos",
       contactUrl: "/en/contact-us", videosUrl: "/en/content/6-videos",
       actions: [
         ["Choose a product", "Please help me choose a suitable COLOUR BOND product."],
         ["How to use a product", "I need advice on how to use a product."],
         ["Orders and delivery", "I have a question about an order or delivery."],
-        ["Complaints and returns", "I need information about a complaint or returning goods."],
+        ["Complaints and returns", "I need information about a complaint or returning goods.", "returns"],
         ["Contact support", null]
       ]
     }
@@ -114,7 +120,7 @@
     var container = document.createElement("div"); container.className = "colourbond-ai-quick-actions";
     t.actions.forEach(function (action) {
       var button = document.createElement("button"); button.type = "button"; button.textContent = action[0];
-      button.addEventListener("click", function () { action[1] ? sendMessage(action[1], action[0]) : showContact(action[0]); });
+      button.addEventListener("click", function () { action[2] === "returns" ? showReturns(action[0]) : action[1] ? sendMessage(action[1], action[0]) : showContact(action[0]); });
       container.appendChild(button);
     }); messages.appendChild(container);
   }
@@ -156,10 +162,17 @@
   function isSafeLinkUrl(value) { if (typeof value !== "string" || !value.trim()) return false; try { var url = new URL(value, window.location.origin); return url.protocol === "https:" || url.protocol === "http:" || url.protocol === "mailto:"; } catch (error) { return false; } }
   function normalize(value) { return String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); }
   function isContactRequest(message) { return /\b(kontakt\w*|email\w*|e-mail|mail\w*|telefon\w*|phone\w*|salesperson|prodejc\w*|podpor\w*|support|reklamac\w*|complaint\w*|return\w*|vraceni\w*)\b/.test(normalize(message)); }
+  function isReturnsRequest(message) { return /\b(reklamac\w*|vrac\w*|vrat\w*|stiznost|complaint\w*|return\w*|refund\w*)\b/.test(normalize(message)); }
   function showContact(displayMessage) {
     if (displayMessage) addMessage("user", displayMessage);
     var assistantMessage = addMessage("bot", t.contactMessage);
     addResponseLinks([{ label: t.email, url: "mailto:info@colourbond.cz" }, { label: t.contactForm, url: t.contactUrl }]);
+    scrollToAssistantMessage(assistantMessage);
+  }
+  function showReturns(displayMessage) {
+    if (displayMessage) addMessage("user", displayMessage);
+    var assistantMessage = addMessage("bot", t.returnsMessage);
+    addResponseLinks([{ label: t.returnsInfo, url: t.returnsUrl }, { label: t.withdrawalForm, url: t.withdrawalUrl }]);
     scrollToAssistantMessage(assistantMessage);
   }
   function setLoading(loading) {
@@ -169,6 +182,7 @@
   function sendMessage(message, displayMessage) {
     if (isSending) return Promise.resolve();
     var userMessage = addMessage("user", displayMessage || message);
+    if (isReturnsRequest(message)) { showReturns(); return Promise.resolve(); }
     if (isContactRequest(message)) { showContact(); return Promise.resolve(); }
     setLoading(true);
     var loadingMessage = addMessage("bot", t.preparing);
