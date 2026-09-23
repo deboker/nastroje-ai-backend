@@ -2,6 +2,25 @@
 
 Express + Supabase starter backend for the WordPress plugin.
 
+## WordPress Plugin
+
+`wp-ai-assistant/` contains the installable WordPress plugin, including its runtime assets.
+Version 0.1.16 fixes the Conversations panel to request the latest 30 conversations,
+ordered by most recent activity. The REST proxy also defaults to 30 when no page size is supplied.
+
+To package it, run from this repository:
+
+```sh
+zip -r /tmp/nastroje-ai-assistant-wordpress-0.1.16.zip wp-ai-assistant -x '*/node_modules/*' '*/.DS_Store'
+```
+
+Upload the ZIP through WordPress **Plugins > Add New > Upload Plugin** and replace
+the installed version. Pushing this repository does not update the WordPress plugin.
+
+The deployed admin implementation is `wp-ai-assistant/admin/build/admin.js`.
+The React files in `admin/src/` are an older scaffold; do not rebuild the admin from
+that scaffold, as it would overwrite the working runtime with incomplete functionality.
+
 ## Responsibilities
 
 - register WordPress sites and issue site tokens
